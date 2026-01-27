@@ -1,0 +1,12 @@
+flask
+requests
+beautifulsoup4
+pypdf
+google-generativeai
+python-dotenv
+streamlit
+lxml
+flask-apscheduler
+flask-sqlalchemy
+streamlit-aggrid
+pandas

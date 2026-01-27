@@ -1,0 +1,229 @@
+from flask import Flask, jsonify, request
+from dotenv import load_dotenv
+import os
+from datetime import datetime, timedelta
+import time
+import threading
+import logging
+from flask_apscheduler import APScheduler
+
+from config import Config
+from models import db, Announcement, StockCode
+from tdnet_scraper import fetch_tdnet_page, parse_announcements
+from announcement_processor import download_and_parse, analyze_saved_text
+
+load_dotenv()
+
+app = Flask(__name__)
+app.config.from_object(Config)
+
+# Initialize Extensions
+db.init_app(app)
+scheduler = APScheduler()
+scheduler.init_app(app)
+scheduler.start()
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+with app.app_context():
+    db.create_all()
+
+# --- Scheduled Task ---
+@scheduler.task('cron', id='scrape_tdnet', hour='8-22', minute='*/5')
+def scheduled_scraping_job():
+    """Runs every 5 minutes between 08:00 and 22:00."""
+    with app.app_context():
+        logger.info("Starting scheduled scraping job...")
+        
+        # 1. Get Stock Codes
+        stocks = StockCode.query.all()
+        if not stocks:
+            logger.info("No stock codes to monitor.")
+            return
+        stock_codes = [s.code for s in stocks]
+        
+        # 2. Scrape (Today)
+        current_date = datetime.now()
+        html_content = fetch_tdnet_page(current_date)
+        if not html_content:
+            return
+            
+        found_announcements = parse_announcements(html_content, stock_codes, Config.ANNOUNCEMENT_KEYWORDS, current_date)
+        
+        # 3. Process New Announcements
+        for ann_data in found_announcements:
+            # Check if exists
+            exists = Announcement.query.filter_by(url=ann_data['url']).first()
+            if not exists:
+                logger.info(f"New announcement found: {ann_data['title']}")
+                new_ann = Announcement(
+                    url=ann_data['url'],
+                    time=ann_data['time'],
+                    stock_code=ann_data['stock_code'],
+                    company_name=ann_data['company'],
+                    title=ann_data['title'],
+                    doc_type=ann_data['type']
+                )
+                db.session.add(new_ann)
+                db.session.commit()
+                
+                # Auto-Process (Download & Analyze)
+                process_announcement(new_ann.id)
+
+def process_announcement(ann_id):
+    """Downloads and analyzes a specific announcement."""
+    ann = Announcement.query.get(ann_id)
+    if not ann:
+        return
+    
+    # Mock dictionary for existing processor function
+    ann_dict = {
+        'url': ann.url,
+        'stock_code': ann.stock_code,
+        'title': ann.title
+    }
+    
+    # 1. Download & Parse
+    dl_result = download_and_parse(ann_dict)
+    if dl_result['status'] == 'success':
+        ann.is_downloaded = True
+        ann.local_path = dl_result['text_path']
+        
+        # Read text for DB storage (limit size if needed)
+        try:
+            with open(ann.local_path, 'r', encoding='utf-8') as f:
+                ann.extracted_text = f.read()
+        except:
+            ann.extracted_text = "Error reading local file."
+
+        # 2. Analyze
+        an_result = analyze_saved_text(ann.local_path, ann.stock_code, ann.title)
+        if an_result['status'] == 'success':
+            ann.gemini_analysis = an_result['analysis']
+            ann.analysis_status = 'success'
+        else:
+            ann.analysis_status = 'failed'
+            ann.error_message = an_result.get('reason')
+    else:
+        ann.analysis_status = 'failed'
+        ann.error_message = dl_result.get('reason')
+    
+    db.session.commit()
+
+# 1. Search Endpoint
+@app.route('/api/announcements', methods=['GET'])
+def get_announcements():
+    # Simple fetch all for now, can add pagination/filtering
+    anns = Announcement.query.order_by(Announcement.fetched_at.desc()).all()
+    return jsonify({'status': 'success', 'announcements': [a.to_dict() for a in anns]})
+
+# 2. Stock Management Endpoints
+@app.route('/api/stocks', methods=['GET', 'POST', 'DELETE'])
+def manage_stocks():
+    if request.method == 'GET':
+        stocks = StockCode.query.all()
+        return jsonify([s.code for s in stocks])
+    
+    elif request.method == 'POST':
+        data = request.json
+        codes = data.get('codes', [])
+        added = 0
+        for code in codes:
+            if not StockCode.query.get(code):
+                db.session.add(StockCode(code=code))
+                added += 1
+        db.session.commit()
+        return jsonify({'status': 'success', 'added': added})
+        
+    elif request.method == 'DELETE':
+        data = request.json
+        codes = data.get('codes', [])
+        for code in codes:
+            stock = StockCode.query.get(code)
+            if stock:
+                db.session.delete(stock)
+        db.session.commit()
+        return jsonify({'status': 'success'})
+
+# 3. Manual Trigger (Optional)
+@app.route('/api/trigger_scrape', methods=['POST'])
+def trigger_scrape():
+    scheduled_scraping_job()
+    return jsonify({'status': 'triggered'})
+
+# 4. Search Endpoint
+@app.route('/api/search', methods=['POST'])
+def search_announcements():
+    data = request.json
+    start_date_str = data.get('start_date')
+    end_date_str = data.get('end_date')
+    codes_str = data.get('codes', '')
+    
+    target_codes = [c.strip() for c in codes_str.split(',') if c.strip()]
+    
+    try:
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return jsonify({'status': 'failed', 'message': 'Invalid date format'}), 400
+
+    found_announcements = []
+    current_date = start_date
+    while current_date <= end_date:
+        html_content = fetch_tdnet_page(current_date)
+        if html_content:
+            anns = parse_announcements(html_content, target_codes, Config.ANNOUNCEMENT_KEYWORDS, current_date)
+            for ann_data in anns:
+                existing = Announcement.query.filter_by(url=ann_data['url']).first()
+                if not existing:
+                    new_ann = Announcement(
+                        url=ann_data['url'],
+                        time=ann_data['time'],
+                        stock_code=ann_data['stock_code'],
+                        company_name=ann_data['company'],
+                        title=ann_data['title'],
+                        doc_type=ann_data['type']
+                    )
+                    db.session.add(new_ann)
+                    db.session.commit()
+                    found_announcements.append(new_ann.to_dict())
+                else:
+                    found_announcements.append(existing.to_dict())
+        current_date += timedelta(days=1)
+        
+    return jsonify({'status': 'success', 'announcements': found_announcements})
+
+# 5. Download Endpoint
+@app.route('/api/download', methods=['POST'])
+def download_endpoint():
+    ann_data = request.json
+    result = download_and_parse(ann_data)
+    if result['status'] == 'success':
+        ann = Announcement.query.filter_by(url=ann_data['url']).first()
+        if ann:
+            ann.is_downloaded = True
+            ann.local_path = result['text_path']
+            try:
+                with open(ann.local_path, 'r', encoding='utf-8') as f:
+                    ann.extracted_text = f.read()
+            except:
+                pass
+            db.session.commit()
+    return jsonify(result)
+
+# 6. Analyze Endpoint
+@app.route('/api/analyze', methods=['POST'])
+def analyze_endpoint():
+    data = request.json
+    result = analyze_saved_text(data.get('text_path'), data.get('stock_code'), data.get('title'))
+    return jsonify(result)
+
+@app.route('/')
+def hello_world():
+    return 'TDnet Analyzer Backend Running'
+
+if __name__ == '__main__':
+    if threading.current_thread() is threading.main_thread():
+        app.run(debug=True, port=5000)
