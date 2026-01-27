@@ -1,7 +1,10 @@
 import os
 
 class Config:
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBHMYa_sp4sgqV78K0Xl-CqKlaxG80zAZE") # Directly writing API key as requested
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "") # Replace with your actual 
+
+
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBHMYa_sp4sgqV78K0Xl-CqKlaxG80zAZE")
     TDNET_BASE_URL = "https://www.release.tdnet.info/inbs/" # This might need adjustment based on actual TDnet structure
     TARGET_STOCK_CODES = ['7203', '9984'] # Example stock codes (Toyota, Softbank Group)
     # Keywords to filter announcements (Using actual Japanese terms found in TDnet titles)
@@ -11,5 +14,5 @@ class Config:
     ANALYSIS_DIR = "./data/analysis"
     # Database Config
     SQLALCHEMY_DATABASE_URI = 'sqlite:///tdnet_analyzer.db'
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_TRACK_MOD1IFICATIONS = False
     SCHEDULER_API_ENABLED = True

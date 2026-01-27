@@ -3,11 +3,13 @@ import requests
 import zipfile
 from bs4 import BeautifulSoup
 from config import Config
+from openai import OpenAI
 from google import genai
 from google.genai import types
 
-# Configure Gemini API
-client = genai.Client(api_key=Config.GEMINI_API_KEY)
+# Configure OpenAI API
+openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
+gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
 
 def download_file(url, stock_code):
     """Downloads a file (PDF/XBRL) to the data/downloads directory."""
@@ -90,7 +92,7 @@ def analyze_with_gemini(text_content, stock_code, title):
     """
 
     try:
-        response = client.models.generate_content(
+        response = gemini_client.models.generate_content(
             model='gemini-2.0-flash-exp',
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())]
@@ -101,6 +103,38 @@ def analyze_with_gemini(text_content, stock_code, title):
     except Exception as e:
         print(f"Error during Gemini analysis: {e}")
         return f"Gemini analysis failed: {e}"
+
+def analyze_with_gpt(text_content, stock_code, title):
+    """Sends extracted text to GPT for analysis and returns the analysis result."""
+    if not text_content:
+        return "No content to analyze."
+
+    prompt = f"""
+    你是一位专业的金融分析师。请分析股票代码 {stock_code} 的公告："{title}"。
+    
+    **要求：回答必须简短精炼，不要长篇大论。**
+    
+    请按以下格式回答：
+    1. **核心结论**：[利好 / 利空 / 中性]
+    2. **关键原因**：简述判断原因（结合公告内容和市场新闻）。
+    3. **潜在风险**：一句话提示潜在风险。
+
+    公告文本：
+    {text_content}
+    """
+
+    try:
+        response = openai_client.chat.completions.create(
+            model='gpt-5-mini',
+            messages=[
+                {"role": "system", "content": "You are a helpful financial analyst."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Error during GPT analysis: {e}")
+        return f"GPT analysis failed: {e}"
 
 def download_and_parse(announcement):
     """Step 2: Downloads and extracts text, saving it locally."""
@@ -131,7 +165,7 @@ def download_and_parse(announcement):
         
     return {'status': 'success', 'text_path': text_path, 'preview': extracted_text[:500]}
 
-def analyze_saved_text(text_path, stock_code, title):
+def analyze_saved_text(text_path, stock_code, title, provider='openai'):
     """Step 3: Reads local text file and sends to Gemini."""
     try:
         with open(text_path, 'r', encoding='utf-8') as f:
@@ -145,7 +179,10 @@ def analyze_saved_text(text_path, stock_code, title):
         if text_content.count('\ufffd') > len(text_content) * 0.05:
             return {'status': 'failed', 'reason': 'Parsed text appears garbled. Please view original file.'}
             
-        analysis = analyze_with_gemini(text_content, stock_code, title)
+        if provider == 'gemini':
+            analysis = analyze_with_gemini(text_content, stock_code, title)
+        else:
+            analysis = analyze_with_gpt(text_content, stock_code, title)
         return {'status': 'success', 'analysis': analysis}
     except Exception as e:
         return {'status': 'failed', 'reason': str(e)}

@@ -231,6 +231,7 @@ def analyze_endpoint():
     data = request.json
     url = data.get('url')
     force_refresh = data.get('force', False)
+    provider = data.get('provider', 'openai')
     
     # Check DB for existing analysis
     ann = Announcement.query.filter_by(url=url).first()
@@ -244,7 +245,7 @@ def analyze_endpoint():
         })
 
     # Perform Analysis
-    result = analyze_saved_text(data.get('text_path'), data.get('stock_code'), data.get('title'))
+    result = analyze_saved_text(data.get('text_path'), data.get('stock_code'), data.get('title'), provider=provider)
     
     if result['status'] == 'success' and ann:
         ann.gemini_analysis = result['analysis']

@@ -16,6 +16,10 @@ start_date = st.sidebar.date_input("Start Date", datetime.now())
 end_date = st.sidebar.date_input("End Date", datetime.now())
 search_scope = st.sidebar.radio("Search Scope", ("Watchlist", "All"), index=0)
 
+st.sidebar.markdown("---")
+st.sidebar.header("AI Settings")
+ai_provider = st.sidebar.selectbox("Model Provider", ["OpenAI (GPT-5 Mini)", "Google (Gemini 2.0 Flash)"], index=0)
+
 # --- Stock Code Management ---
 STOCK_CODES_FILE = "stock_codes.txt"
 
@@ -218,7 +222,8 @@ if st.session_state['search_results']:
                     analyze_btn_label = "Re-analyze 🔄" if has_analysis else "AI Analyze 🤖"
                     
                     if st.button(analyze_btn_label, key=f"analyze_{i}"):
-                        with st.spinner("Analyzing with Gemini..."):
+                        provider_code = "gemini" if "Gemini" in ai_provider else "openai"
+                        with st.spinner(f"Analyzing with {ai_provider}..."):
                             # Get path from session or DB
                             text_path = st.session_state['downloaded_files'].get(ann['url']) or ann.get('local_path')
                             
@@ -227,7 +232,8 @@ if st.session_state['search_results']:
                                 "text_path": text_path,
                                 "stock_code": ann['stock_code'],
                                 "title": ann['title'],
-                                "force": True if has_analysis else False # Force refresh if clicking Re-analyze
+                                "force": True if has_analysis else False, # Force refresh if clicking Re-analyze
+                                "provider": provider_code
                             }
                             try:
                                 resp = requests.post(f"{BACKEND_URL}/api/analyze", json=payload)
@@ -250,7 +256,7 @@ if st.session_state['search_results']:
             display_time = st.session_state['analysis_times'].get(ann['url']) or ann.get('analysis_time')
             
             if display_analysis:
-                with st.expander("Gemini Analysis Result", expanded=True):
+                with st.expander("AI Analysis Result", expanded=True):
                     if display_time:
                         st.caption(f"Analysis Time: {display_time}")
                     st.markdown(display_analysis)
