@@ -25,6 +25,7 @@ class Announcement(db.Model):
     extracted_text = db.Column(db.Text) # Original text for "Intent Battle"
     gemini_analysis = db.Column(db.Text) # Analysis result
     analysis_status = db.Column(db.String(20), default='pending') # pending, success, failed
+    analysis_time = db.Column(db.DateTime)
     error_message = db.Column(db.String(500))
 
     def to_dict(self):
@@ -36,7 +37,10 @@ class Announcement(db.Model):
             'title': self.title,
             'url': self.url,
             'type': self.doc_type,
+            'is_downloaded': self.is_downloaded,
+            'local_path': self.local_path,
             'analysis': self.gemini_analysis,
             'original_text': self.extracted_text,
-            'status': self.analysis_status
+            'status': self.analysis_status,
+            'analysis_time': self.analysis_time.strftime("%Y-%m-%d %H:%M:%S") if self.analysis_time else None
         }

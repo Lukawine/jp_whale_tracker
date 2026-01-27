@@ -6,6 +6,7 @@ import time
 import threading
 import logging
 from flask_apscheduler import APScheduler
+from sqlalchemy import text, inspect
 
 from config import Config
 from models import db, Announcement, StockCode
@@ -29,6 +30,16 @@ logger = logging.getLogger(__name__)
 
 with app.app_context():
     db.create_all()
+
+    # 自动迁移：检查并添加缺失的 analysis_time 列
+    inspector = inspect(db.engine)
+    if 'announcement' in inspector.get_table_names():
+        existing_columns = [col['name'] for col in inspector.get_columns('announcement')]
+        if 'analysis_time' not in existing_columns:
+            logger.info("Migrating database: Adding analysis_time column...")
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE announcement ADD COLUMN analysis_time DATETIME"))
+                conn.commit()
 
 # --- Scheduled Task ---
 @scheduler.task('cron', id='scrape_tdnet', hour='8-22', minute='*/5')
@@ -102,6 +113,7 @@ def process_announcement(ann_id):
         an_result = analyze_saved_text(ann.local_path, ann.stock_code, ann.title)
         if an_result['status'] == 'success':
             ann.gemini_analysis = an_result['analysis']
+            ann.analysis_time = datetime.now()
             ann.analysis_status = 'success'
         else:
             ann.analysis_status = 'failed'
@@ -217,7 +229,30 @@ def download_endpoint():
 @app.route('/api/analyze', methods=['POST'])
 def analyze_endpoint():
     data = request.json
+    url = data.get('url')
+    force_refresh = data.get('force', False)
+    
+    # Check DB for existing analysis
+    ann = Announcement.query.filter_by(url=url).first()
+    
+    if ann and ann.gemini_analysis and ann.analysis_status == 'success' and not force_refresh:
+        return jsonify({
+            'status': 'success', 
+            'analysis': ann.gemini_analysis,
+            'analysis_time': ann.analysis_time.strftime("%Y-%m-%d %H:%M:%S") if ann.analysis_time else None,
+            'cached': True
+        })
+
+    # Perform Analysis
     result = analyze_saved_text(data.get('text_path'), data.get('stock_code'), data.get('title'))
+    
+    if result['status'] == 'success' and ann:
+        ann.gemini_analysis = result['analysis']
+        ann.analysis_time = datetime.now()
+        ann.analysis_status = 'success'
+        db.session.commit()
+        result['analysis_time'] = ann.analysis_time.strftime("%Y-%m-%d %H:%M:%S")
+        
     return jsonify(result)
 
 @app.route('/')

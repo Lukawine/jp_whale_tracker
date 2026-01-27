@@ -3,6 +3,11 @@ import requests
 import zipfile
 from bs4 import BeautifulSoup
 from config import Config
+from google import genai
+from google.genai import types
+
+# Configure Gemini API
+client = genai.Client(api_key=Config.GEMINI_API_KEY)
 
 def download_file(url, stock_code):
     """Downloads a file (PDF/XBRL) to the data/downloads directory."""
@@ -65,7 +70,37 @@ def extract_text_from_pdf(pdf_path):
 
 def analyze_with_gemini(text_content, stock_code, title):
     """Sends extracted text to Gemini for analysis and returns the analysis result."""
-    return "Gemini analysis is currently disabled."
+    if not text_content:
+        return "No content to analyze."
+
+    prompt = f"""
+    你是一位专业的金融分析师。请分析股票代码 {stock_code} 的公告："{title}"。
+    
+    请利用 Google Search 搜索该股票的最新新闻或未来即将发生的事件，结合以下公告文本进行综合分析。
+    
+    **要求：回答必须简短精炼，不要长篇大论。**
+    
+    请按以下格式回答：
+    1. **核心结论**：[利好 / 利空 / 中性]
+    2. **关键原因**：简述判断原因（结合公告内容和市场新闻）。
+    3. **潜在风险**：一句话提示潜在风险。
+
+    公告文本：
+    {text_content}
+    """
+
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.0-flash-exp',
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())]
+            ),
+            contents=prompt
+        )
+        return response.text if response.text else "Gemini analysis failed to return content."
+    except Exception as e:
+        print(f"Error during Gemini analysis: {e}")
+        return f"Gemini analysis failed: {e}"
 
 def download_and_parse(announcement):
     """Step 2: Downloads and extracts text, saving it locally."""

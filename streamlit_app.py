@@ -14,6 +14,7 @@ st.markdown("--- ")
 st.sidebar.header("Search Settings")
 start_date = st.sidebar.date_input("Start Date", datetime.now())
 end_date = st.sidebar.date_input("End Date", datetime.now())
+search_scope = st.sidebar.radio("Search Scope", ("Watchlist", "All"), index=0)
 
 # --- Stock Code Management ---
 STOCK_CODES_FILE = "stock_codes.txt"
@@ -37,6 +38,8 @@ if 'downloaded_files' not in st.session_state:
     st.session_state['downloaded_files'] = {} # Map url -> text_path
 if 'analysis_results' not in st.session_state:
     st.session_state['analysis_results'] = {} # Map url -> analysis text
+if 'analysis_times' not in st.session_state:
+    st.session_state['analysis_times'] = {} # Map url -> time string
 if 'monitoring' not in st.session_state:
     st.session_state['monitoring'] = True
 if 'seen_urls' not in st.session_state:
@@ -92,7 +95,10 @@ else:
 def perform_search(silent=False, use_today=False):
     """Executes the search against the backend."""
     # Use managed codes
-    current_codes_str = ",".join(st.session_state['managed_stock_codes'])
+    if search_scope == "All":
+        current_codes_str = ""
+    else:
+        current_codes_str = ",".join(st.session_state['managed_stock_codes'])
     try:
         if use_today:
             current_date_str = datetime.now().strftime("%Y-%m-%d")
@@ -193,7 +199,7 @@ if st.session_state['search_results']:
                 btn_key = f"btn_{i}"
                 
                 # Check if already downloaded
-                is_downloaded = ann['url'] in st.session_state['downloaded_files']
+                is_downloaded = ann.get('is_downloaded', False) or (ann['url'] in st.session_state['downloaded_files'])
                 
                 if not is_downloaded:
                     if st.button("Download & Parse", key=btn_key):
@@ -206,12 +212,48 @@ if st.session_state['search_results']:
                                 st.error("Download failed")
                 else:
                     st.success("Downloaded")
-                    st.button("AI Analyze (Disabled)", key=f"analyze_{i}", disabled=True)
+                    
+                    # Check if analysis exists in DB (passed via search results) or session
+                    has_analysis = ann.get('analysis') is not None or ann['url'] in st.session_state['analysis_results']
+                    analyze_btn_label = "Re-analyze 🔄" if has_analysis else "AI Analyze 🤖"
+                    
+                    if st.button(analyze_btn_label, key=f"analyze_{i}"):
+                        with st.spinner("Analyzing with Gemini..."):
+                            # Get path from session or DB
+                            text_path = st.session_state['downloaded_files'].get(ann['url']) or ann.get('local_path')
+                            
+                            payload = {
+                                "url": ann['url'],
+                                "text_path": text_path,
+                                "stock_code": ann['stock_code'],
+                                "title": ann['title'],
+                                "force": True if has_analysis else False # Force refresh if clicking Re-analyze
+                            }
+                            try:
+                                resp = requests.post(f"{BACKEND_URL}/api/analyze", json=payload)
+                                data = resp.json()
+                                if resp.status_code == 200 and data['status'] == 'success':
+                                    st.session_state['analysis_results'][ann['url']] = data['analysis']
+                                    st.session_state['analysis_times'][ann['url']] = data.get('analysis_time')
+                                    # Update local ann object to reflect immediate change
+                                    ann['analysis'] = data['analysis']
+                                    ann['analysis_time'] = data.get('analysis_time')
+                                else:
+                                    reason = data.get('reason', 'Unknown error')
+                                    st.error(f"Analysis failed: {reason}")
+                            except Exception as e:
+                                st.error(f"Connection error: {e}")
 
             # Show Analysis if available
-            if ann['url'] in st.session_state['analysis_results']:
+            # Priority: Session State > DB Data
+            display_analysis = st.session_state['analysis_results'].get(ann['url']) or ann.get('analysis')
+            display_time = st.session_state['analysis_times'].get(ann['url']) or ann.get('analysis_time')
+            
+            if display_analysis:
                 with st.expander("Gemini Analysis Result", expanded=True):
-                    st.write(st.session_state['analysis_results'][ann['url']])
+                    if display_time:
+                        st.caption(f"Analysis Time: {display_time}")
+                    st.markdown(display_analysis)
             
             st.markdown("---")
 
