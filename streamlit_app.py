@@ -33,6 +33,21 @@ def save_stock_codes(codes):
     with open(STOCK_CODES_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(codes))
 
+def get_grade_badge(grade):
+    """Generates a color-coded markdown badge for the announcement grade."""
+    if not grade:
+        return ""
+    
+    color_map = {
+        'S': 'red',
+        'A': 'orange',
+        'D': 'blue',
+        'E': 'gray'
+    }
+    color = color_map.get(grade, 'gray') # Default to gray for 'C' or others
+    return f":{color}[**{grade}级**]"
+
+
 BACKEND_URL = "http://127.0.0.1:5000"
 
 # Initialize session state
@@ -195,7 +210,8 @@ if st.session_state['search_results']:
                 if new_badge:
                     st.markdown(f":red[{new_badge} **NEW ANNOUNCEMENT**]")
                 
-                st.markdown(f"**{ann.get('time', '--:--')} | {ann['stock_code']} {ann['company']}**")
+                grade_badge = get_grade_badge(ann.get('grade'))
+                st.markdown(f"{grade_badge} | **{ann['stock_code']}** | {ann['company']} | {ann.get('time', '--:--')}")
                 st.write(f"{new_badge}[{ann['title']}]({ann['url']}) ({ann['type']})")
             
             with col2:

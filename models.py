@@ -21,6 +21,10 @@ class Announcement(db.Model):
     is_downloaded = db.Column(db.Boolean, default=False)
     local_path = db.Column(db.String(500))
     
+    # Auto-Grading
+    grade = db.Column(db.String(5)) # S, A, C, D, E
+    score = db.Column(db.Integer)   # 0-100
+    
     # Analysis
     extracted_text = db.Column(db.Text) # Original text for "Intent Battle"
     gemini_analysis = db.Column(db.Text) # Analysis result
@@ -42,5 +46,7 @@ class Announcement(db.Model):
             'analysis': self.gemini_analysis,
             'original_text': self.extracted_text,
             'status': self.analysis_status,
-            'analysis_time': self.analysis_time.strftime("%Y-%m-%d %H:%M:%S") if self.analysis_time else None
+            'analysis_time': self.analysis_time.strftime("%Y-%m-%d %H:%M:%S") if self.analysis_time else None,
+            'grade': self.grade,
+            'score': self.score
         }

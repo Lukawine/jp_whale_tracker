@@ -12,6 +12,7 @@ from config import Config
 from models import db, Announcement, StockCode
 from tdnet_scraper import fetch_tdnet_page, parse_announcements
 from announcement_processor import download_and_parse, analyze_saved_text
+from grading_system import grader # Import the new module
 
 load_dotenv()
 
@@ -31,15 +32,19 @@ logger = logging.getLogger(__name__)
 with app.app_context():
     db.create_all()
 
-    # 自动迁移：检查并添加缺失的 analysis_time 列
+    # 自动迁移：检查并添加缺失的列 (analysis_time, grade, score)
     inspector = inspect(db.engine)
     if 'announcement' in inspector.get_table_names():
         existing_columns = [col['name'] for col in inspector.get_columns('announcement')]
-        if 'analysis_time' not in existing_columns:
-            logger.info("Migrating database: Adding analysis_time column...")
-            with db.engine.connect() as conn:
+        with db.engine.connect() as conn:
+            if 'analysis_time' not in existing_columns:
+                logger.info("Migrating database: Adding analysis_time column...")
                 conn.execute(text("ALTER TABLE announcement ADD COLUMN analysis_time DATETIME"))
-                conn.commit()
+            if 'grade' not in existing_columns:
+                logger.info("Migrating database: Adding grade and score columns...")
+                conn.execute(text("ALTER TABLE announcement ADD COLUMN grade VARCHAR(5)"))
+                conn.execute(text("ALTER TABLE announcement ADD COLUMN score INTEGER"))
+            conn.commit()
 
 # --- Scheduled Task ---
 @scheduler.task('cron', id='scrape_tdnet', hour='8-22', minute='*/5')
@@ -69,13 +74,19 @@ def scheduled_scraping_job():
             exists = Announcement.query.filter_by(url=ann_data['url']).first()
             if not exists:
                 logger.info(f"New announcement found: {ann_data['title']}")
+                
+                # Apply Auto-Grading
+                grading_result = grader.calculate_grade(ann_data['stock_code'], ann_data['title'])
+                
                 new_ann = Announcement(
                     url=ann_data['url'],
                     time=ann_data['time'],
                     stock_code=ann_data['stock_code'],
                     company_name=ann_data['company'],
                     title=ann_data['title'],
-                    doc_type=ann_data['type']
+                    doc_type=ann_data['type'],
+                    grade=grading_result['grade'],
+                    score=grading_result['score']
                 )
                 db.session.add(new_ann)
                 db.session.commit()
@@ -106,6 +117,12 @@ def process_announcement(ann_id):
         try:
             with open(ann.local_path, 'r', encoding='utf-8') as f:
                 ann.extracted_text = f.read()
+            
+            # Noise Filtering (Text Content)
+            if grader.check_noise(ann.extracted_text):
+                ann.grade = 'D'
+                ann.score = 30
+                logger.info(f"Downgraded announcement {ann.id} to D due to noise keywords in text.")
         except:
             ann.extracted_text = "Error reading local file."
 
@@ -190,13 +207,18 @@ def search_announcements():
             for ann_data in anns:
                 existing = Announcement.query.filter_by(url=ann_data['url']).first()
                 if not existing:
+                    # Apply Auto-Grading for manual search results too
+                    grading_result = grader.calculate_grade(ann_data['stock_code'], ann_data['title'])
+                    
                     new_ann = Announcement(
                         url=ann_data['url'],
                         time=ann_data['time'],
                         stock_code=ann_data['stock_code'],
                         company_name=ann_data['company'],
                         title=ann_data['title'],
-                        doc_type=ann_data['type']
+                        doc_type=ann_data['type'],
+                        grade=grading_result['grade'],
+                        score=grading_result['score']
                     )
                     db.session.add(new_ann)
                     db.session.commit()
@@ -220,6 +242,11 @@ def download_endpoint():
             try:
                 with open(ann.local_path, 'r', encoding='utf-8') as f:
                     ann.extracted_text = f.read()
+                
+                # Noise Filtering (Text Content)
+                if grader.check_noise(ann.extracted_text):
+                    ann.grade = 'D'
+                    ann.score = 30
             except:
                 pass
             db.session.commit()
