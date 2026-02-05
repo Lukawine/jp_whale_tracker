@@ -1,6 +1,8 @@
-data/
 .venv/
-.vscode/
+venv/
+env/
+bin/
+lib/
 __pycache__/
 *.pyc
 .git/

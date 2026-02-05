@@ -1,8 +1,67 @@
 import streamlit as st
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import os
+
+BACKEND_URL = "http://127.0.0.1:5000"
+
+# --- Helper Function: Perform Search ---
+def perform_search(silent=False, use_today=False):
+    """Executes the search against the backend."""
+    # Use managed codes
+    if search_scope == "All":
+        current_codes_str = ""
+    else:
+        current_codes_str = ",".join(st.session_state['managed_stock_codes'])
+    try:
+        if use_today:
+            current_date_str = datetime.now().strftime("%Y-%m-%d")
+            payload = {
+                "start_date": current_date_str,
+                "end_date": current_date_str,
+                "codes": current_codes_str
+            }
+        else:
+            payload = {
+                "start_date": st.session_state['search_start_date'].strftime("%Y-%m-%d"),
+                "end_date": st.session_state['search_end_date'].strftime("%Y-%m-%d"),
+                "codes": current_codes_str
+            }
+        response = requests.post(f"{BACKEND_URL}/api/search", json=payload)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data['status'] == 'success':
+            announcements = data['announcements']
+            
+            # Identify new items for monitoring
+            new_indices = set()
+            if st.session_state['monitoring']:
+                for idx, ann in enumerate(announcements):
+                    if ann['url'] not in st.session_state['seen_urls']:
+                        new_indices.add(idx)
+                        st.session_state['seen_urls'].add(ann['url'])
+                
+                if new_indices:
+                    st.toast(f"Found {len(new_indices)} new announcements!", icon="🔔")
+                elif not silent:
+                    st.toast("No new announcements found.", icon="zzz")
+            else:
+                # For manual search, just mark everything as seen so future monitoring doesn't flag them all
+                for ann in announcements:
+                    st.session_state['seen_urls'].add(ann['url'])
+
+            st.session_state['search_results'] = announcements
+            st.session_state['new_announcements_indices'] = new_indices
+            
+            if not silent:
+                st.success(f"Found {len(announcements)} announcements.")
+        else:
+            st.error(f"Search failed: {data.get('message')}")
+            
+    except Exception as e:
+        st.error(f"Connection error: {e}")
 
 # --- Streamlit UI --- 
 st.set_page_config(layout="wide", page_title="TDnet Announcement Analyzer")
@@ -12,9 +71,58 @@ st.markdown("--- ")
 
 # --- Sidebar: Search Parameters ---
 st.sidebar.header("Search Settings")
-start_date = st.sidebar.date_input("Start Date", datetime.now())
-end_date = st.sidebar.date_input("End Date", datetime.now())
+
+def get_default_date():
+    """Returns today's date, or the previous Friday if today is Saturday or Sunday."""
+    today = datetime.now().date()
+    if today.weekday() == 5: # Saturday
+        return today - timedelta(days=1)
+    elif today.weekday() == 6: # Sunday
+        return today - timedelta(days=2)
+    return today
+
+if 'selected_date' not in st.session_state:
+    st.session_state['selected_date'] = get_default_date()
+if 'search_start_date' not in st.session_state:
+    st.session_state['search_start_date'] = get_default_date()
+if 'search_end_date' not in st.session_state:
+    st.session_state['search_end_date'] = get_default_date()
+
+st.session_state['selected_date'] = st.sidebar.date_input(
+    "Select Date", 
+    value=st.session_state['selected_date']
+)
+st.sidebar.markdown("**Quick Date Ranges:**")
+col_d1, col_d2 = st.sidebar.columns(2)
+
+def update_date_range(days_offset):
+    st.session_state['search_end_date'] = st.session_state['selected_date']
+    if days_offset == 0: # Yesterday
+        st.session_state['search_start_date'] = st.session_state['selected_date'] - timedelta(days=1)
+    else: # N days ago
+        st.session_state['search_start_date'] = st.session_state['selected_date'] - timedelta(days=days_offset -1)
+    st.session_state['monitoring'] = False # Stop monitoring if manual search is triggered
+    st.session_state['just_clicked_quick_button'] = True # Set flag to trigger search
+
+if col_d1.button("昨天"):
+    update_date_range(0)
+if col_d2.button("3天"):
+    update_date_range(3)
+
+col_d3, col_d4 = st.sidebar.columns(2)
+if col_d3.button("7天"):
+    update_date_range(7)
+if col_d4.button("10天"):
+    update_date_range(10)
+
 search_scope = st.sidebar.radio("Search Scope", ("Watchlist", "All"), index=0)
+
+if st.sidebar.button("Search TDnet"):
+    st.session_state['search_start_date'] = st.session_state['selected_date']
+    st.session_state['search_end_date'] = st.session_state['selected_date']
+    st.session_state['monitoring'] = False # Stop monitoring if manual search is triggered
+    with st.spinner("Searching TDnet..."):
+        perform_search()
 
 st.sidebar.markdown("---")
 st.sidebar.header("AI Settings")
@@ -48,7 +156,7 @@ def get_grade_badge(grade):
     return f":{color}[**{grade}级**]"
 
 
-BACKEND_URL = "http://127.0.0.1:5000"
+
 
 # Initialize session state
 if 'search_results' not in st.session_state:
@@ -69,6 +177,8 @@ if 'new_announcements_indices' not in st.session_state:
     st.session_state['new_announcements_indices'] = set()
 if 'managed_stock_codes' not in st.session_state:
     st.session_state['managed_stock_codes'] = load_stock_codes()
+if 'just_clicked_quick_button' not in st.session_state: # New flag
+    st.session_state['just_clicked_quick_button'] = False
 
 # --- Sidebar: Stock Management UI ---
 st.sidebar.markdown("---")
@@ -110,62 +220,13 @@ if st.session_state['managed_stock_codes']:
 else:
     st.sidebar.info("List is empty. Searching ALL data.")
 
-# --- Helper Function: Perform Search ---
-def perform_search(silent=False, use_today=False):
-    """Executes the search against the backend."""
-    # Use managed codes
-    if search_scope == "All":
-        current_codes_str = ""
-    else:
-        current_codes_str = ",".join(st.session_state['managed_stock_codes'])
-    try:
-        if use_today:
-            current_date_str = datetime.now().strftime("%Y-%m-%d")
-            payload = {
-                "start_date": current_date_str,
-                "end_date": current_date_str,
-                "codes": current_codes_str
-            }
-        else:
-            payload = {
-                "start_date": start_date.strftime("%Y-%m-%d"),
-                "end_date": end_date.strftime("%Y-%m-%d"),
-                "codes": current_codes_str
-            }
-        response = requests.post(f"{BACKEND_URL}/api/search", json=payload)
-        response.raise_for_status()
-        data = response.json()
-        
-        if data['status'] == 'success':
-            announcements = data['announcements']
-            
-            # Identify new items for monitoring
-            new_indices = set()
-            if st.session_state['monitoring']:
-                for idx, ann in enumerate(announcements):
-                    if ann['url'] not in st.session_state['seen_urls']:
-                        new_indices.add(idx)
-                        st.session_state['seen_urls'].add(ann['url'])
-                
-                if new_indices:
-                    st.toast(f"Found {len(new_indices)} new announcements!", icon="🔔")
-                elif not silent:
-                    st.toast("No new announcements found.", icon="zzz")
-            else:
-                # For manual search, just mark everything as seen so future monitoring doesn't flag them all
-                for ann in announcements:
-                    st.session_state['seen_urls'].add(ann['url'])
 
-            st.session_state['search_results'] = announcements
-            st.session_state['new_announcements_indices'] = new_indices
-            
-            if not silent:
-                st.success(f"Found {len(announcements)} announcements.")
-        else:
-            st.error(f"Search failed: {data.get('message')}")
-            
-    except Exception as e:
-        st.error(f"Connection error: {e}")
+
+# Check if a quick button was clicked and trigger search
+if st.session_state.get('just_clicked_quick_button'):
+    st.session_state['just_clicked_quick_button'] = False # Reset flag
+    with st.spinner("Searching TDnet (quick date range)..."):
+        perform_search()
 
 # --- Sidebar: Monitoring Controls ---
 st.sidebar.markdown("---")
@@ -185,16 +246,7 @@ if st.session_state['monitoring']:
     st.sidebar.success("Monitoring Active 🟢")
     st.sidebar.caption("Polling every 5 minutes...")
 
-# --- Step 1: Search ---
-if st.sidebar.button("Search TDnet"):
-    st.session_state['monitoring'] = False # Stop monitoring if manual search is triggered
-    if end_date < start_date:
-        st.error("End date must be after start date.")
-    elif (end_date - start_date).days > 30:
-        st.error("Date range cannot exceed 5 days.")
-    else:
-        with st.spinner("Searching TDnet..."):
-            perform_search()
+
 
 # --- Display Results ---
 if st.session_state['search_results']:
@@ -232,6 +284,21 @@ if st.session_state['search_results']:
                                 st.error("Download failed")
                 else:
                     st.success("Downloaded")
+                    
+                    # Display "View Text" button if a text_path is available
+                    text_path = st.session_state['downloaded_files'].get(ann['url']) or ann.get('local_path')
+                    if text_path:
+                        view_file_url = f"{BACKEND_URL}/api/get_file?file_path={text_path}"
+                        
+                        file_extension = os.path.splitext(text_path)[1].lower()
+                        if file_extension == '.htm' or file_extension == '.html':
+                            link_label = f"View XBRL (HTML) 🌐 ({os.path.basename(text_path)})"
+                        elif file_extension == '.txt':
+                            link_label = f"View Text 📄 ({os.path.basename(text_path)})"
+                        else:
+                            link_label = f"View File 🗄️ ({os.path.basename(text_path)})"
+                            
+                        st.markdown(f"**[{link_label}]({view_file_url})**", unsafe_allow_html=True)
                     
                     # Check if analysis exists in DB (passed via search results) or session
                     has_analysis = ann.get('analysis') is not None or ann['url'] in st.session_state['analysis_results']

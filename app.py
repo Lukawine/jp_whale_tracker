@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
@@ -111,20 +111,24 @@ def process_announcement(ann_id):
     dl_result = download_and_parse(ann_dict)
     if dl_result['status'] == 'success':
         ann.is_downloaded = True
-        ann.local_path = dl_result['text_path']
-        
-        # Read text for DB storage (limit size if needed)
-        try:
-            with open(ann.local_path, 'r', encoding='utf-8') as f:
-                ann.extracted_text = f.read()
-            
-            # Noise Filtering (Text Content)
-            if grader.check_noise(ann.extracted_text):
-                ann.grade = 'D'
-                ann.score = 30
-                logger.info(f"Downgraded announcement {ann.id} to D due to noise keywords in text.")
-        except:
-            ann.extracted_text = "Error reading local file."
+        ann.local_path = dl_result['text_path'] # Renamed 'text_path' to be generic file path
+
+        # Read text for DB storage only if it's a .txt file (i.e., from PDF)
+        if ann.local_path.lower().endswith('.txt'):
+            try:
+                with open(ann.local_path, 'r', encoding='utf-8') as f:
+                    ann.extracted_text = f.read()
+                
+                # Noise Filtering (Text Content)
+                if grader.check_noise(ann.extracted_text):
+                    ann.grade = 'D'
+                    ann.score = 30
+                    logger.info(f"Downgraded announcement {ann.id} to D due to noise keywords in text.")
+            except:
+                ann.extracted_text = "Error reading local file."
+        else:
+            # For HTML files (XBRL), extracted_text remains empty or is explicitly set to indicate HTML
+            ann.extracted_text = "Content is HTML, view in browser." 
 
         # 2. Analyze
         an_result = analyze_saved_text(ann.local_path, ann.stock_code, ann.title)
@@ -238,17 +242,22 @@ def download_endpoint():
         ann = Announcement.query.filter_by(url=ann_data['url']).first()
         if ann:
             ann.is_downloaded = True
-            ann.local_path = result['text_path']
-            try:
-                with open(ann.local_path, 'r', encoding='utf-8') as f:
-                    ann.extracted_text = f.read()
-                
-                # Noise Filtering (Text Content)
-                if grader.check_noise(ann.extracted_text):
-                    ann.grade = 'D'
-                    ann.score = 30
-            except:
-                pass
+            ann.local_path = result['text_path'] # Renamed from text_path to generic file_path
+            
+            # Read text for DB storage only if it's a .txt file (i.e., from PDF)
+            if ann.local_path.lower().endswith('.txt'):
+                try:
+                    with open(ann.local_path, 'r', encoding='utf-8') as f:
+                        ann.extracted_text = f.read()
+                    
+                    # Noise Filtering (Text Content)
+                    if grader.check_noise(ann.extracted_text):
+                        ann.grade = 'D'
+                        ann.score = 30
+                except:
+                    ann.extracted_text = "Error reading local file."
+            else:
+                ann.extracted_text = "Content is HTML, view in browser."
             db.session.commit()
     return jsonify(result)
 
@@ -282,6 +291,32 @@ def analyze_endpoint():
         result['analysis_time'] = ann.analysis_time.strftime("%Y-%m-%d %H:%M:%S")
         
     return jsonify(result)
+
+# 7. Get File Endpoint (for opening in new tab)
+@app.route('/api/get_file', methods=['GET'])
+def get_file_endpoint():
+    file_path = request.args.get('file_path')
+    
+    if not file_path:
+        return jsonify({'status': 'failed', 'message': 'file_path is required'}), 400
+
+    # Ensure the path is within the allowed download directory for security
+    absolute_path = os.path.abspath(file_path)
+    download_dir_abs = os.path.abspath(Config.DOWNLOAD_DIR)
+
+    if not absolute_path.startswith(download_dir_abs):
+        return jsonify({'status': 'failed', 'message': 'Access denied: Path outside allowed directory'}), 403
+
+    try:
+        # Extract directory and filename for send_from_directory
+        directory = os.path.dirname(absolute_path)
+        filename = os.path.basename(absolute_path)
+        # send_from_directory will automatically infer mimetype
+        return send_from_directory(directory, filename, as_attachment=False)
+    except FileNotFoundError:
+        return jsonify({'status': 'failed', 'message': 'File not found'}), 404
+    except Exception as e:
+        return jsonify({'status': 'failed', 'message': f'Error serving file: {str(e)}'}), 500
 
 @app.route('/')
 def hello_world():

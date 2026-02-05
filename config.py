@@ -3,7 +3,6 @@ import os
 class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "") # Replace with your actual 
 
-
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBHMYa_sp4sgqV78K0Xl-CqKlaxG80zAZE")
     TDNET_BASE_URL = "https://www.release.tdnet.info/inbs/" # This might need adjustment based on actual TDnet structure
     TARGET_STOCK_CODES = ['7203', '9984'] # Example stock codes (Toyota, Softbank Group)

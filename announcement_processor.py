@@ -3,12 +3,10 @@ import requests
 import zipfile
 from bs4 import BeautifulSoup
 from config import Config
-from openai import OpenAI
 from google import genai
 from google.genai import types
 
 # Configure OpenAI API
-openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
 gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
 
 def download_file(url, stock_code):
@@ -55,6 +53,42 @@ def extract_text_from_xbrl_zip(zip_path):
         return text_content[:50000] 
     except Exception as e:
         print(f"XBRL extraction failed: {e}")
+        return None
+
+def extract_html_from_xbrl_zip(zip_path, dest_dir):
+    """Extracts the main HTML file from an XBRL zip and returns its path."""
+    try:
+        # Create a unique subdirectory for extraction
+        zip_filename_base = os.path.splitext(os.path.basename(zip_path))[0]
+        extract_path = os.path.join(dest_dir, f"{zip_filename_base}_xbrl")
+        os.makedirs(extract_path, exist_ok=True)
+
+        main_html_file = None
+        html_files = []
+
+        with zipfile.ZipFile(zip_path, 'r') as z:
+            z.extractall(extract_path)
+            
+            # Find all HTML files
+            for root, _, files in os.walk(extract_path):
+                for file in files:
+                    if file.lower().endswith(('.htm', '.html')):
+                        html_files.append(os.path.join(root, file))
+
+        if not html_files:
+            print(f"No HTML files found in XBRL zip: {zip_path}")
+            return None
+
+        # Heuristic to find the main HTML file (e.g., _all.htm or largest)
+        # Sort by size (descending) then by name (to prefer _all.htm/html)
+        html_files.sort(key=lambda f: (os.path.getsize(f), f.lower().find('_all.htm')), reverse=True)
+        
+        main_html_file = html_files[0]
+        print(f"Identified main HTML file: {main_html_file}")
+        return main_html_file
+
+    except Exception as e:
+        print(f"XBRL HTML extraction failed: {e}")
         return None
 
 def extract_text_from_pdf(pdf_path):
@@ -104,40 +138,8 @@ def analyze_with_gemini(text_content, stock_code, title):
         print(f"Error during Gemini analysis: {e}")
         return f"Gemini analysis failed: {e}"
 
-def analyze_with_gpt(text_content, stock_code, title):
-    """Sends extracted text to GPT for analysis and returns the analysis result."""
-    if not text_content:
-        return "No content to analyze."
-
-    prompt = f"""
-    你是一位专业的金融分析师。请分析股票代码 {stock_code} 的公告："{title}"。
-    
-    **要求：回答必须简短精炼，不要长篇大论。**
-    
-    请按以下格式回答：
-    1. **核心结论**：[利好 / 利空 / 中性]
-    2. **关键原因**：简述判断原因（结合公告内容和市场新闻）。
-    3. **潜在风险**：一句话提示潜在风险。
-
-    公告文本：
-    {text_content}
-    """
-
-    try:
-        response = openai_client.chat.completions.create(
-            model='gpt-5-mini',
-            messages=[
-                {"role": "system", "content": "You are a helpful financial analyst."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"Error during GPT analysis: {e}")
-        return f"GPT analysis failed: {e}"
-
 def download_and_parse(announcement):
-    """Step 2: Downloads and extracts text, saving it locally."""
+    """Step 2: Downloads and processes the announcement file."""
     print(f"Downloading and parsing: {announcement['title']}")
     
     # 1. Download
@@ -145,25 +147,33 @@ def download_and_parse(announcement):
     if not file_path:
         return {'status': 'failed', 'reason': 'Download error'}
 
-    # 2. Extract Text
-    extracted_text = ""
+    # 2. Process based on file type
+    processed_file_path = None
     if file_path.lower().endswith('.zip') or 'xbrl' in announcement['url'].lower():
-        extracted_text = extract_text_from_xbrl_zip(file_path)
-    elif file_path.lower().endswith('.pdf'):
-        extracted_text = extract_text_from_pdf(file_path)
-    
-    if not extracted_text:
-        return {'status': 'failed', 'reason': 'Text extraction error'}
-
-    # 3. Save Text Locally
-    os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
-    text_filename = f"{os.path.basename(file_path)}.txt"
-    text_path = os.path.join(Config.DOWNLOAD_DIR, text_filename)
-    
-    with open(text_path, 'w', encoding='utf-8') as f:
-        f.write(extracted_text)
+        # Handle XBRL: Extract HTML
+        processed_file_path = extract_html_from_xbrl_zip(file_path, Config.DOWNLOAD_DIR)
+        if not processed_file_path:
+            return {'status': 'failed', 'reason': 'XBRL HTML extraction error'}
         
-    return {'status': 'success', 'text_path': text_path, 'preview': extracted_text[:500]}
+        # For XBRL, we return the path to the HTML, no text extraction here
+        return {'status': 'success', 'text_path': processed_file_path} # Renamed text_path to be generic
+        
+    elif file_path.lower().endswith('.pdf'):
+        # Handle PDF: Extract text and save as .txt
+        extracted_text = extract_text_from_pdf(file_path)
+        if not extracted_text:
+            return {'status': 'failed', 'reason': 'PDF text extraction error'}
+
+        os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
+        text_filename = f"{os.path.basename(file_path)}.txt"
+        processed_file_path = os.path.join(Config.DOWNLOAD_DIR, text_filename)
+        
+        with open(processed_file_path, 'w', encoding='utf-8') as f:
+            f.write(extracted_text)
+            
+        return {'status': 'success', 'text_path': processed_file_path, 'preview': extracted_text[:500]}
+    else:
+        return {'status': 'failed', 'reason': 'Unsupported file type'}
 
 def analyze_saved_text(text_path, stock_code, title, provider='openai'):
     """Step 3: Reads local text file and sends to Gemini."""
@@ -179,10 +189,7 @@ def analyze_saved_text(text_path, stock_code, title, provider='openai'):
         if text_content.count('\ufffd') > len(text_content) * 0.05:
             return {'status': 'failed', 'reason': 'Parsed text appears garbled. Please view original file.'}
             
-        if provider == 'gemini':
-            analysis = analyze_with_gemini(text_content, stock_code, title)
-        else:
-            analysis = analyze_with_gpt(text_content, stock_code, title)
+        analysis = analyze_with_gemini(text_content, stock_code, title)
         return {'status': 'success', 'analysis': analysis}
     except Exception as e:
         return {'status': 'failed', 'reason': str(e)}

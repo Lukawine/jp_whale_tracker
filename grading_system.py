@@ -1,4 +1,5 @@
 import re
+from fuzzywuzzy import fuzz
 
 class AnnouncementGrader:
     def __init__(self):
@@ -27,6 +28,9 @@ class AnnouncementGrader:
         self.patterns_noise = [
             r'影響は軽微', r'検討開始', r'金額は未定', r'今期業績への影響は未定', r'意向表明'
         ]
+        self.keywords_s = [s.replace(r'上方修正', '') for s in self.patterns_s]
+        self.keywords_a = [a.replace(r'業務提携', '') for a in self.patterns_a]
+        self.keywords_d = [d.replace(r'下方修正', '') for d in self.patterns_d]
 
         # 2. 模拟波动率数据 (Volatility Map)
         # 在实际生产中，这里应该连接金融数据库或 API
@@ -59,15 +63,15 @@ class AnnouncementGrader:
         grade = 'C' # 默认为中性
         score = 50
         
-        # 关键词匹配优先级: S > D > A > E
-        if any(re.search(p, title) for p in self.patterns_s):
+        # 关键词匹配优先级: S > D > A > E; 使用模糊匹配
+        if any(fuzz.partial_ratio(p, title) > 90 for p in self.patterns_s):
             grade = 'S'; score = 95
-        elif any(re.search(p, title) for p in self.patterns_d):
+        elif any(fuzz.partial_ratio(p, title) > 90 for p in self.patterns_d):
             grade = 'D'; score = 30
-        elif any(re.search(p, title) for p in self.patterns_a):
+        elif any(fuzz.partial_ratio(p, title) > 90 for p in self.patterns_a):
             grade = 'A'; score = 80
         elif any(re.search(p, title) for p in self.patterns_e):
-            grade = 'E'; score = 10
+            grade = 'E'; score = 10 # E级不做模糊匹配
         
         # Noise Filter Override (Title)
         if any(re.search(p, title) for p in self.patterns_noise):
