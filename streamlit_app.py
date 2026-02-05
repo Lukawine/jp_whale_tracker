@@ -7,10 +7,10 @@ import os
 BACKEND_URL = "http://127.0.0.1:5000"
 
 # --- Helper Function: Perform Search ---
-def perform_search(silent=False, use_today=False):
+def perform_search(search_scope_val, silent=False, use_today=False):
     """Executes the search against the backend."""
     # Use managed codes
-    if search_scope == "All":
+    if search_scope_val == "All":
         current_codes_str = ""
     else:
         current_codes_str = ",".join(st.session_state['managed_stock_codes'])
@@ -122,11 +122,11 @@ if st.sidebar.button("Search TDnet"):
     st.session_state['search_end_date'] = st.session_state['selected_date']
     st.session_state['monitoring'] = False # Stop monitoring if manual search is triggered
     with st.spinner("Searching TDnet..."):
-        perform_search()
+        perform_search(search_scope)
 
 st.sidebar.markdown("---")
 st.sidebar.header("AI Settings")
-ai_provider = st.sidebar.selectbox("Model Provider", ["OpenAI (GPT-5 Mini)", "Google (Gemini 2.0 Flash)"], index=0)
+ai_provider = st.sidebar.selectbox("Model Provider", ["Google (Gemini 2.0 Flash)", "Alibaba (Qwen-Turbo)"], index=1)
 
 # --- Stock Code Management ---
 STOCK_CODES_FILE = "stock_codes.txt"
@@ -226,7 +226,7 @@ else:
 if st.session_state.get('just_clicked_quick_button'):
     st.session_state['just_clicked_quick_button'] = False # Reset flag
     with st.spinner("Searching TDnet (quick date range)..."):
-        perform_search()
+        perform_search(search_scope)
 
 # --- Sidebar: Monitoring Controls ---
 st.sidebar.markdown("---")
@@ -275,11 +275,40 @@ if st.session_state['search_results']:
                 
                 if not is_downloaded:
                     if st.button("Download & Parse", key=btn_key):
-                        with st.spinner("Downloading..."):
+                        with st.spinner("Downloading and analyzing..."): # Changed spinner text
                             resp = requests.post(f"{BACKEND_URL}/api/download", json=ann)
                             if resp.status_code == 200 and resp.json()['status'] == 'success':
-                                st.session_state['downloaded_files'][ann['url']] = resp.json()['text_path']
-                                st.rerun()
+                                text_path = resp.json()['text_path']
+                                st.session_state['downloaded_files'][ann['url']] = text_path
+                                
+                                # --- Automatically trigger AI Analyze ---
+                                # Assuming 'qwen' is the default/only provider for auto-analysis
+                                provider_code = 'qwen' 
+                                
+                                # Use ann data and the newly downloaded text_path
+                                analyze_payload = {
+                                    "url": ann['url'],
+                                    "text_path": text_path,
+                                    "stock_code": ann['stock_code'],
+                                    "title": ann['title'],
+                                    "force": True, # Always force refresh for auto-analysis after download
+                                    "provider": provider_code
+                                }
+                                try:
+                                    analyze_resp = requests.post(f"{BACKEND_URL}/api/analyze", json=analyze_payload)
+                                    analyze_data = analyze_resp.json()
+                                    if analyze_resp.status_code == 200 and analyze_data['status'] == 'success':
+                                        st.session_state['analysis_results'][ann['url']] = analyze_data['analysis']
+                                        st.session_state['analysis_times'][ann['url']] = analyze_data.get('analysis_time')
+                                        st.success("Download and AI Analysis Complete!")
+                                    else:
+                                        reason = analyze_data.get('reason', 'Unknown error')
+                                        st.error(f"AI Analysis failed after download: {reason}")
+                                except Exception as e:
+                                    st.error(f"Connection error during AI Analysis: {e}")
+                                # --- End Auto-trigger AI Analyze ---
+                                
+                                st.rerun() # Rerun to display downloaded file link and analysis result
                             else:
                                 st.error("Download failed")
                 else:
@@ -301,38 +330,7 @@ if st.session_state['search_results']:
                             
                         st.markdown(f"**[{link_label}]({view_file_url})**", unsafe_allow_html=True)
                     
-                    # Check if analysis exists in DB (passed via search results) or session
-                    has_analysis = ann.get('analysis') is not None or ann['url'] in st.session_state['analysis_results']
-                    analyze_btn_label = "Re-analyze 🔄" if has_analysis else "AI Analyze 🤖"
-                    
-                    if st.button(analyze_btn_label, key=f"analyze_{i}"):
-                        provider_code = "gemini" if "Gemini" in ai_provider else "openai"
-                        with st.spinner(f"Analyzing with {ai_provider}..."):
-                            # Get path from session or DB
-                            text_path = st.session_state['downloaded_files'].get(ann['url']) or ann.get('local_path')
-                            
-                            payload = {
-                                "url": ann['url'],
-                                "text_path": text_path,
-                                "stock_code": ann['stock_code'],
-                                "title": ann['title'],
-                                "force": True if has_analysis else False, # Force refresh if clicking Re-analyze
-                                "provider": provider_code
-                            }
-                            try:
-                                resp = requests.post(f"{BACKEND_URL}/api/analyze", json=payload)
-                                data = resp.json()
-                                if resp.status_code == 200 and data['status'] == 'success':
-                                    st.session_state['analysis_results'][ann['url']] = data['analysis']
-                                    st.session_state['analysis_times'][ann['url']] = data.get('analysis_time')
-                                    # Update local ann object to reflect immediate change
-                                    ann['analysis'] = data['analysis']
-                                    ann['analysis_time'] = data.get('analysis_time')
-                                else:
-                                    reason = data.get('reason', 'Unknown error')
-                                    st.error(f"Analysis failed: {reason}")
-                            except Exception as e:
-                                st.error(f"Connection error: {e}")
+
 
             # Show Analysis if available
             # Priority: Session State > DB Data
@@ -359,7 +357,7 @@ if st.session_state['monitoring']:
         # Check if it's time to poll
         if current_time - st.session_state['last_poll_time'] >= poll_interval:
             st.session_state['last_poll_time'] = current_time
-            perform_search(silent=True, use_today=True)
+            perform_search(search_scope, silent=True, use_today=True)
             st.rerun()
         else:
             # Show countdown

@@ -1,16 +1,26 @@
+
+
+import dashscope
+from dashscope.api_entities.dashscope_response import Message # Specific import for Message object
+
+
 import os
 import requests
 import zipfile
 from bs4 import BeautifulSoup
 from config import Config
-from google import genai
-from google.genai import types
 import html2text # New import
 import pymupdf4llm # New import
 import shutil # New import
 
-# Configure OpenAI API
-gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
+from dashscope.api_entities.dashscope_response import Message # Specific import for Message object
+
+# dashscope.api_key = config.QWEN_API_KEY
+
+
+# Configure AI API Keys
+_dashscope_initialized = False # Initialize lazily
+
 
 def download_file(url, stock_code):
     """Downloads a file (PDF/XBRL) to the data/downloads directory."""
@@ -86,40 +96,6 @@ def convert_pdf_to_markdown(pdf_path):
         print(f"PDF to Markdown conversion failed: {e}")
         return None
 
-def analyze_with_gemini(text_content, stock_code, title):
-    """Sends extracted text to Gemini for analysis and returns the analysis result."""
-    if not text_content:
-        return "No content to analyze."
-
-    prompt = f"""
-    你是一位专业的金融分析师。请分析股票代码 {stock_code} 的公告："{title}"。
-    
-    请利用 Google Search 搜索该股票的最新新闻或未来即将发生的事件，结合以下公告文本进行综合分析。
-    
-    **要求：回答必须简短精炼，不要长篇大论。**
-    
-    请按以下格式回答：
-    1. **核心结论**：[利好 / 利空 / 中性]
-    2. **关键原因**：简述判断原因（结合公告内容和市场新闻）。
-    3. **潜在风险**：一句话提示潜在风险。
-
-    公告文本：
-    {text_content}
-    """
-
-    try:
-        response = gemini_client.models.generate_content(
-            model='gemini-2.0-flash-exp',
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())]
-            ),
-            contents=prompt
-        )
-        return response.text if response.text else "Gemini analysis failed to return content."
-    except Exception as e:
-        print(f"Error during Gemini analysis: {e}")
-        return f"Gemini analysis failed: {e}"
-
 def download_and_parse(announcement):
     """Step 2: Downloads and processes the announcement file, converting to Markdown."""
     print(f"Downloading and processing: {announcement['title']}")
@@ -182,8 +158,84 @@ def download_and_parse(announcement):
             
     return {'status': 'success', 'text_path': md_path, 'preview': markdown_content[:500]}
 
-def analyze_saved_text(text_path, stock_code, title, provider='openai'):
-    """Step 3: Reads local text file and sends to Gemini."""
+
+def analyze_with_ai(text_content, stock_code, title):
+    """Sends extracted text to AI (Qwen) for analysis and returns the analysis result."""
+    global _dashscope_initialized
+    if not _dashscope_initialized:
+        dashscope.api_key = Config.QWEN_API_KEY
+        _dashscope_initialized = True
+    
+    if not text_content:
+        return "No content to analyze."
+    
+    print(f"DEBUG: text_content length for Qwen: {len(text_content)}")
+    print(f"DEBUG: Using detailed analysis prompt for Qwen.")
+
+    prompt = f"""
+    你是一位专业的金融分析师。请对股票代码 {stock_code} 的公告："{title}" 进行深入分析。
+    
+    请充分利用你的知识和对市场数据的理解，结合以下公告文本进行综合分析。
+    
+    **要求：回答必须专业、客观，结构清晰，简明扼要，避免长篇大论。**
+    
+    请严格按照以下维度和格式进行分析，每个维度使用Markdown标题，并在每个维度下进行简洁的总结和判断：
+    
+    ### 核心结论
+    [利好 / 利空 / 中性]
+    
+    ### 业绩质量
+    - 净利润增长中有多少比例来自主营业务，有多少来自非经常性损益（如卖资产）？
+    - 请根据公告内容，量化或定性说明其构成。
+    
+    ### 预期差
+    - 分析市场是否已经消化了这份利好？请基于你可获取到的信息，评估市场对公告的反应是超预期，符合预期，还是不及预期？
+    
+    ### 风险预警
+    - 文中是否有关于‘现金流’或‘成本增加’的负面措辞？请具体指出并评估其潜在影响。
+    - 还有其他值得关注的潜在风险点吗？
+    
+    ### 未来预测
+    - 根据管理层的描述（若有），下一季度的核心增长点在哪里？
+    - 还有其他可以预期的发展方向吗？
+    
+    ---
+    
+    公告文本：
+    {text_content[:4000]} # Increase limit for more detailed analysis
+    """
+    
+    try:
+        messages = [
+            Message(role='system', content='You are a helpful assistant.'),
+            Message(role='user', content=prompt)
+        ]
+        
+        # Use Qwen-turbo as a general purpose model. Adjust as needed.
+        response = dashscope.Generation.call(
+            model='qwen-turbo', 
+            messages=messages,
+            # tool_choice='auto' # Enable tool calling if Qwen model supports it and prompt is updated
+            # tools=[{'type': 'function', 'function': {'name': 'google_search', 'description': 'Searches Google for information', 'parameters': {'type': 'object', 'properties': {'query': {'type': 'string'}}}}}]
+        )
+
+        if response.status_code == 200:
+            if response.output and len(response.output) > 0:
+                return response.output.text
+            else:
+                print(f"Qwen analysis failed: No choices in response. Full response: {response}")
+                return f"Qwen analysis failed: No content or choices in response. Status: {response.status_code}"
+        else:
+            print(f"Qwen API call failed. Status: {response.status_code}, Code: {response.code}, Message: {response.message}. Full response: {response}")
+            return f"Qwen analysis failed: {response.code} - {response.message}"
+    except Exception as e:
+        print(f"Error during Qwen analysis: {e}")
+        return f"Qwen analysis failed: {e}"
+
+
+
+def analyze_saved_text(text_path, stock_code, title):
+    """Step 3: Reads local text file and sends to specified AI for analysis."""
     try:
         with open(text_path, 'r', encoding='utf-8') as f:
             text_content = f.read()
@@ -196,7 +248,13 @@ def analyze_saved_text(text_path, stock_code, title, provider='openai'):
         if text_content.count('\ufffd') > len(text_content) * 0.05:
             return {'status': 'failed', 'reason': 'Parsed text appears garbled. Please view original file.'}
             
-        analysis = analyze_with_gemini(text_content, stock_code, title)
-        return {'status': 'success', 'analysis': analysis}
+        analysis_result = analyze_with_ai(text_content, stock_code, title)
+        # analyze_with_ai returns a string directly, so wrap it in success status
+        if isinstance(analysis_result, str) and not analysis_result.startswith("Error"):
+             return {'status': 'success', 'analysis': analysis_result}
+        else: # Handle cases where analyze_with_ai returns an error string or dict
+            if isinstance(analysis_result, dict) and analysis_result.get('status') == 'failed':
+                return analysis_result
+            return {'status': 'failed', 'reason': analysis_result} # Default error if string
     except Exception as e:
         return {'status': 'failed', 'reason': str(e)}

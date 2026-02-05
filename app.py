@@ -11,7 +11,7 @@ from sqlalchemy import text, inspect
 from config import Config
 from models import db, Announcement, StockCode
 from tdnet_scraper import fetch_tdnet_page, parse_announcements
-from announcement_processor import download_and_parse, analyze_saved_text
+import announcement_processor
 from grading_system import grader # Import the new module
 
 load_dotenv()
@@ -108,7 +108,7 @@ def process_announcement(ann_id):
     }
     
     # 1. Download & Parse
-    dl_result = download_and_parse(ann_dict)
+    dl_result = announcement_processor.download_and_parse(ann_dict)
     if dl_result['status'] == 'success':
         ann.is_downloaded = True
         ann.local_path = dl_result['text_path'] # Renamed 'text_path' to be generic file path
@@ -132,7 +132,7 @@ def process_announcement(ann_id):
             logger.warning(f"Unsupported file type for extracted_text storage for ann {ann.id}: {ann.local_path}")
 
         # 2. Analyze
-        an_result = analyze_saved_text(ann.local_path, ann.stock_code, ann.title)
+        an_result = announcement_processor.analyze_saved_text(ann.local_path, ann.stock_code, ann.title)
         if an_result['status'] == 'success':
             ann.gemini_analysis = an_result['analysis']
             ann.analysis_time = datetime.now()
@@ -238,7 +238,7 @@ def search_announcements():
 @app.route('/api/download', methods=['POST'])
 def download_endpoint():
     ann_data = request.json
-    result = download_and_parse(ann_data)
+    result = announcement_processor.download_and_parse(ann_data)
     if result['status'] == 'success':
         ann = Announcement.query.filter_by(url=ann_data['url']).first()
         if ann:
@@ -270,28 +270,33 @@ def analyze_endpoint():
     data = request.json
     url = data.get('url')
     force_refresh = data.get('force', False)
-    provider = data.get('provider', 'openai')
+    provider = data.get('provider', 'gemini') # Default to gemini if not provided
     
-    # Check DB for existing analysis
+    # Check DB for existing analysis. If no force_refresh, use cached result.
     ann = Announcement.query.filter_by(url=url).first()
     
+    # For now, we'll store all AI analysis in ann.gemini_analysis for simplicity,
+    # and reuse if force_refresh is False. A more robust solution might use
+    # separate fields or a JSON field to track analysis per provider.
     if ann and ann.gemini_analysis and ann.analysis_status == 'success' and not force_refresh:
         return jsonify({
             'status': 'success', 
             'analysis': ann.gemini_analysis,
             'analysis_time': ann.analysis_time.strftime("%Y-%m-%d %H:%M:%S") if ann.analysis_time else None,
-            'cached': True
+            'cached': True,
+            'provider_used': 'cached' # Indicate cached analysis
         })
 
     # Perform Analysis
-    result = analyze_saved_text(data.get('text_path'), data.get('stock_code'), data.get('title'), provider=provider)
+    result = announcement_processor.analyze_saved_text(data.get('text_path'), data.get('stock_code'), data.get('title'))
     
     if result['status'] == 'success' and ann:
-        ann.gemini_analysis = result['analysis']
+        ann.gemini_analysis = result['analysis'] # Store analysis, regardless of provider
         ann.analysis_time = datetime.now()
         ann.analysis_status = 'success'
         db.session.commit()
         result['analysis_time'] = ann.analysis_time.strftime("%Y-%m-%d %H:%M:%S")
+        result['provider_used'] = provider # Indicate which provider was used for fresh analysis
         
     return jsonify(result)
 
