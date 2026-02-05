@@ -291,10 +291,11 @@ if st.session_state['search_results']:
                         view_file_url = f"{BACKEND_URL}/api/get_file?file_path={text_path}"
                         
                         file_extension = os.path.splitext(text_path)[1].lower()
-                        if file_extension == '.htm' or file_extension == '.html':
-                            link_label = f"View XBRL (HTML) 🌐 ({os.path.basename(text_path)})"
-                        elif file_extension == '.txt':
-                            link_label = f"View Text 📄 ({os.path.basename(text_path)})"
+                        if file_extension == '.md':
+                            link_label = f"View Markdown 📝 ({os.path.basename(text_path)})"
+                        elif file_extension == '.htm' or file_extension == '.html':
+                            # Keep this for backward compatibility or if there's a reason to still directly view HTML
+                            link_label = f"View HTML 🌐 ({os.path.basename(text_path)})"
                         else:
                             link_label = f"View File 🗄️ ({os.path.basename(text_path)})"
                             

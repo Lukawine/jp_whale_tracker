@@ -113,8 +113,8 @@ def process_announcement(ann_id):
         ann.is_downloaded = True
         ann.local_path = dl_result['text_path'] # Renamed 'text_path' to be generic file path
 
-        # Read text for DB storage only if it's a .txt file (i.e., from PDF)
-        if ann.local_path.lower().endswith('.txt'):
+        # Read Markdown content for DB storage
+        if ann.local_path.lower().endswith('.md'): # Expecting a .md file now
             try:
                 with open(ann.local_path, 'r', encoding='utf-8') as f:
                     ann.extracted_text = f.read()
@@ -124,11 +124,12 @@ def process_announcement(ann_id):
                     ann.grade = 'D'
                     ann.score = 30
                     logger.info(f"Downgraded announcement {ann.id} to D due to noise keywords in text.")
-            except:
-                ann.extracted_text = "Error reading local file."
+            except Exception as e:
+                ann.extracted_text = f"Error reading local Markdown file: {e}"
+                logger.error(f"Error reading local Markdown file for ann {ann.id}: {e}")
         else:
-            # For HTML files (XBRL), extracted_text remains empty or is explicitly set to indicate HTML
-            ann.extracted_text = "Content is HTML, view in browser." 
+            ann.extracted_text = "Unsupported file type for extracted_text storage."
+            logger.warning(f"Unsupported file type for extracted_text storage for ann {ann.id}: {ann.local_path}")
 
         # 2. Analyze
         an_result = analyze_saved_text(ann.local_path, ann.stock_code, ann.title)
@@ -244,8 +245,8 @@ def download_endpoint():
             ann.is_downloaded = True
             ann.local_path = result['text_path'] # Renamed from text_path to generic file_path
             
-            # Read text for DB storage only if it's a .txt file (i.e., from PDF)
-            if ann.local_path.lower().endswith('.txt'):
+            # Read Markdown content for DB storage
+            if ann.local_path.lower().endswith('.md'): # Expecting a .md file now
                 try:
                     with open(ann.local_path, 'r', encoding='utf-8') as f:
                         ann.extracted_text = f.read()
@@ -254,10 +255,12 @@ def download_endpoint():
                     if grader.check_noise(ann.extracted_text):
                         ann.grade = 'D'
                         ann.score = 30
-                except:
-                    ann.extracted_text = "Error reading local file."
+                except Exception as e:
+                    ann.extracted_text = f"Error reading local Markdown file: {e}"
+                    logger.error(f"Error reading local Markdown file for ann {ann.url}: {e}")
             else:
-                ann.extracted_text = "Content is HTML, view in browser."
+                ann.extracted_text = "Unsupported file type for extracted_text storage."
+                logger.warning(f"Unsupported file type for extracted_text storage for ann {ann.url}: {ann.local_path}")
             db.session.commit()
     return jsonify(result)
 

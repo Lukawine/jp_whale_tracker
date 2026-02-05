@@ -5,6 +5,9 @@ from bs4 import BeautifulSoup
 from config import Config
 from google import genai
 from google.genai import types
+import html2text # New import
+import pymupdf4llm # New import
+import shutil # New import
 
 # Configure OpenAI API
 gemini_client = genai.Client(api_key=Config.GEMINI_API_KEY)
@@ -35,25 +38,7 @@ def download_file(url, stock_code):
         print(f"Error downloading {url}: {e}")
         return None
 
-def extract_text_from_xbrl_zip(zip_path):
-    """Extracts text from XBRL zip file (TDnet format)."""
-    try:
-        text_content = ""
-        with zipfile.ZipFile(zip_path, 'r') as z:
-            # TDnet XBRL zips usually contain .xbrl or .htm files in a folder
-            target_files = [f for f in z.namelist() if f.endswith('.htm') or f.endswith('.xbrl')]
-            target_files.sort(key=lambda x: len(x)) 
-            
-            for filename in target_files:
-                with z.open(filename) as f:
-                    content = f.read()
-                    soup = BeautifulSoup(content, 'lxml') 
-                    text_content += soup.get_text(separator='\n', strip=True) + "\n\n"
-                    
-        return text_content[:50000] 
-    except Exception as e:
-        print(f"XBRL extraction failed: {e}")
-        return None
+
 
 def extract_html_from_xbrl_zip(zip_path, dest_dir):
     """Extracts the main HTML file from an XBRL zip and returns its path."""
@@ -91,17 +76,14 @@ def extract_html_from_xbrl_zip(zip_path, dest_dir):
         print(f"XBRL HTML extraction failed: {e}")
         return None
 
-def extract_text_from_pdf(pdf_path):
-    """Extracts text from PDF using pypdf."""
+def convert_pdf_to_markdown(pdf_path):
+    """Converts PDF to Markdown using pymupdf4llm."""
     try:
-        from pypdf import PdfReader
-        reader = PdfReader(pdf_path)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-        return text[:50000]
+        from pymupdf4llm import to_markdown
+        md_content = to_markdown(pdf_path)
+        return md_content
     except Exception as e:
-        print(f"PDF extraction failed: {e}")
+        print(f"PDF to Markdown conversion failed: {e}")
         return None
 
 def analyze_with_gemini(text_content, stock_code, title):
@@ -139,41 +121,66 @@ def analyze_with_gemini(text_content, stock_code, title):
         return f"Gemini analysis failed: {e}"
 
 def download_and_parse(announcement):
-    """Step 2: Downloads and processes the announcement file."""
-    print(f"Downloading and parsing: {announcement['title']}")
+    """Step 2: Downloads and processes the announcement file, converting to Markdown."""
+    print(f"Downloading and processing: {announcement['title']}")
     
     # 1. Download
     file_path = download_file(announcement['url'], announcement['stock_code'])
     if not file_path:
         return {'status': 'failed', 'reason': 'Download error'}
 
-    # 2. Process based on file type
-    processed_file_path = None
+    # Determine output Markdown file path
+    base_filename = os.path.splitext(os.path.basename(file_path))[0]
+    md_filename = f"{base_filename}.md"
+    md_path = os.path.join(Config.DOWNLOAD_DIR, md_filename)
+
+    # 2. Process based on file type and convert to Markdown
+    markdown_content = None
+    extracted_html_dir = None # To keep track of XBRL extraction directory for cleanup
+
     if file_path.lower().endswith('.zip') or 'xbrl' in announcement['url'].lower():
-        # Handle XBRL: Extract HTML
-        processed_file_path = extract_html_from_xbrl_zip(file_path, Config.DOWNLOAD_DIR)
-        if not processed_file_path:
+        # Handle XBRL: Extract HTML, then convert HTML to Markdown
+        html_file_path = extract_html_from_xbrl_zip(file_path, Config.DOWNLOAD_DIR)
+        if not html_file_path:
             return {'status': 'failed', 'reason': 'XBRL HTML extraction error'}
         
-        # For XBRL, we return the path to the HTML, no text extraction here
-        return {'status': 'success', 'text_path': processed_file_path} # Renamed text_path to be generic
+        extracted_html_dir = os.path.dirname(html_file_path) # Store dir for cleanup
         
-    elif file_path.lower().endswith('.pdf'):
-        # Handle PDF: Extract text and save as .txt
-        extracted_text = extract_text_from_pdf(file_path)
-        if not extracted_text:
-            return {'status': 'failed', 'reason': 'PDF text extraction error'}
-
-        os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
-        text_filename = f"{os.path.basename(file_path)}.txt"
-        processed_file_path = os.path.join(Config.DOWNLOAD_DIR, text_filename)
-        
-        with open(processed_file_path, 'w', encoding='utf-8') as f:
-            f.write(extracted_text)
+        try:
+            with open(html_file_path, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+            markdown_content = html2text.html2text(html_content)
+        except Exception as e:
+            print(f"HTML to Markdown conversion failed for XBRL: {e}")
+            return {'status': 'failed', 'reason': f"XBRL HTML to Markdown conversion error: {e}"}
             
-        return {'status': 'success', 'text_path': processed_file_path, 'preview': extracted_text[:500]}
+    elif file_path.lower().endswith('.pdf'):
+        # Handle PDF: Convert PDF to Markdown
+        try:
+            markdown_content = convert_pdf_to_markdown(file_path)
+        except Exception as e:
+            print(f"PDF to Markdown conversion failed: {e}")
+            return {'status': 'failed', 'reason': f"PDF to Markdown conversion error: {e}"}
     else:
-        return {'status': 'failed', 'reason': 'Unsupported file type'}
+        return {'status': 'failed', 'reason': 'Unsupported file type for Markdown conversion'}
+
+    if not markdown_content:
+        return {'status': 'failed', 'reason': 'Markdown conversion yielded empty content.'}
+
+    # 3. Save Markdown Locally
+    os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
+    with open(md_path, 'w', encoding='utf-8') as f:
+        f.write(markdown_content)
+    
+    # Optional: Clean up temporary extracted HTML directory for XBRL
+    if extracted_html_dir and os.path.exists(extracted_html_dir):
+        try:
+            shutil.rmtree(extracted_html_dir)
+            print(f"Cleaned up temporary XBRL HTML directory: {extracted_html_dir}")
+        except Exception as e:
+            print(f"Error cleaning up XBRL HTML directory {extracted_html_dir}: {e}")
+            
+    return {'status': 'success', 'text_path': md_path, 'preview': markdown_content[:500]}
 
 def analyze_saved_text(text_path, stock_code, title, provider='openai'):
     """Step 3: Reads local text file and sends to Gemini."""

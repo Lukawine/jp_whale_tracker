@@ -9,4 +9,5 @@ lxml
 flask-apscheduler
 flask-sqlalchemy
 streamlit-aggrid
-pandas
+pymupdf4llm
+html2text
