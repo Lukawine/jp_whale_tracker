@@ -37,23 +37,35 @@ def download_file(url, stock_code):
     try:
         print(f"Attempting to download {url} to {file_path}")
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'ja,en-US;q=0.7,en;q=0.3',
-            'Referer': 'https://www.release.tdnet.info/inbs/I_main_00.html', # 模拟从主页跳转
-            'Connection': 'keep-alive',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1', # Do Not Track
+            'Connection': 'close', # 关键：阿里云上建议设为 close，防止连接池被封锁
+            'Upgrade-Insecure-Requests': '1',
+            'Referer': 'https://www.release.tdnet.info/inbs/I_main_00.html' # 必须带上来源页
         }
         response = requests.get(url,headers=headers, stream=True, timeout=30)
         response.raise_for_status()
-
+        
         with open(file_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(chunk_size=1024*1024):
                 f.write(chunk)
         print(f"Successfully downloaded {file_name}")
         return file_path
     except requests.exceptions.RequestException as e:
         print(f"Error downloading {url}: {e}")
         return None
+    except requests.exceptions.ConnectionError as e:
+        print(f"❌ 还是断开连接? 尝试换成单次请求模式...")
+        # 如果 Session 模式还是不行，改用单次调用
+        resp = requests.get(url, headers=headers, timeout=20)
+        with open(file_path, 'wb') as f:
+            for chunk in resp.iter_content(chunk_size=1024*1024):
+                f.write(chunk)
+        print(f"Successfully downloaded {file_name}")
+        return file_path
 
 
 
