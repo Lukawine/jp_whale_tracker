@@ -1,0 +1,12 @@
+.venv
+.git
+.gitignore
+.DS_Store
+__pycache__/
+*.pyc
+*.log
+.vscode/
+
+# Exclude data directories that are often mounted as volumes
+data/downloads/
+instance/
