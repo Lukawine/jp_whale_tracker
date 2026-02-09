@@ -11,3 +11,5 @@ flask-sqlalchemy
 streamlit-aggrid
 pymupdf4llm
 html2text
+dashscope
+fuzzywuzzy

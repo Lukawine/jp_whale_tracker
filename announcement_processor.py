@@ -36,7 +36,14 @@ def download_file(url, stock_code):
 
     try:
         print(f"Attempting to download {url} to {file_path}")
-        response = requests.get(url, stream=True, timeout=30)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'ja,en-US;q=0.7,en;q=0.3',
+            'Referer': 'https://www.release.tdnet.info/inbs/I_main_00.html', # 模拟从主页跳转
+            'Connection': 'keep-alive',
+        }
+        response = requests.get(url,headers=headers, stream=True, timeout=30)
         response.raise_for_status()
 
         with open(file_path, 'wb') as f:
