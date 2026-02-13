@@ -4,11 +4,10 @@ beautifulsoup4
 pypdf
 google-generativeai
 python-dotenv
-streamlit
 lxml
 flask-apscheduler
 flask-sqlalchemy
-streamlit-aggrid
+
 pymupdf4llm
 html2text
 dashscope

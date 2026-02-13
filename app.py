@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, render_template
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
@@ -327,8 +327,9 @@ def get_file_endpoint():
         return jsonify({'status': 'failed', 'message': f'Error serving file: {str(e)}'}), 500
 
 @app.route('/')
-def hello_world():
-    return 'TDnet Analyzer Backend Running'
+def index():
+    anns = Announcement.query.order_by(Announcement.fetched_at.desc()).all()
+    return render_template('index.html', announcements=[a.to_dict() for a in anns])
 
 if __name__ == '__main__':
     if threading.current_thread() is threading.main_thread():

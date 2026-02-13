@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>JP Whale Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="mt-5">JP Whale Tracker</h1>
+
+      <div class="mt-4 p-3 border rounded">
+        <h3>Search Announcements</h3>
+        <form id="search-form">
+          <div class="row g-3 align-items-end">
+            <div class="col-md">
+              <label for="start-date" class="form-label">Start Date</label>
+              <input type="date" class="form-control" id="start-date">
+            </div>
+            <div class="col-md">
+              <label for="end-date" class="form-label">End Date</label>
+              <input type="date" class="form-control" id="end-date">
+            </div>
+            <div class="col-md">
+              <label for="stock-codes" class="form-label">Stock Codes (comma-separated)</label>
+              <input type="text" class="form-control" id="stock-codes" placeholder="e.g., 6501, 9984">
+            </div>
+            <div class="col-auto">
+              <button type="submit" class="btn btn-primary">Search</button>
+            </div>
+            <div class="col-auto">
+              <button type="button" class="btn btn-secondary" id="trigger-scrape">Trigger Scrape</button>
+            </div>
+            <div class="col-auto">
+              <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#stocksModal">
+                Manage Stocks
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div id="search-results" class="mt-4">
+        <div id="loading" style="display: none;">
+            <div class="d-flex justify-content-center">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+        <table class="table table-striped mt-4">
+          <thead>
+            <tr>
+              <th>Security Code</th>
+              <th>Company Name</th>
+              <th>Title</th>
+              <th>Date</th>
+              <th>URL</th>
+              <th>Grade</th>
+              <th>Reason</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for announcement in announcements %}
+            <tr id="announcement-{{ announcement.id }}" data-is-downloaded="{{ 'true' if announcement.is_downloaded else 'false' }}" data-local-path="{{ announcement.local_path or '' }}">
+              <td>{{ announcement.stock_code }}</td>
+              <td>{{ announcement.company }}</td>
+              <td><a href="{{ announcement.url }}" target="_blank">{{ announcement.title }}</a></td>
+              <td>{{ announcement.fetched_at.strftime('%Y-%m-%d') }}</td>
+              <td><a href="{{ announcement.url }}" target="_blank">Link</a></td>
+              <td>{{ announcement.grade }}</td>
+              <td>{{ announcement.reason or '' }}</td>
+              <td>
+                <button class="btn btn-sm btn-primary download-btn" data-ann-id="{{ announcement.id }}" data-ann-url="{{ announcement.url }}" data-ann-stock="{{ announcement.stock_code }}" data-ann-title="{{ announcement.title }}" {% if announcement.is_downloaded %}disabled{% endif %}>Download</button>
+                <button class="btn btn-sm btn-info analyze-btn" data-ann-id="{{ announcement.id }}" data-ann-url="{{ announcement.url }}" data-ann-local-path="{{ announcement.local_path or '' }}" data-ann-stock="{{ announcement.stock_code }}" data-ann-title="{{ announcement.title }}">Analyze</button>
+                <button class="btn btn-sm btn-secondary view-file-btn" data-local-path="{{ announcement.local_path or '' }}" {% if not announcement.is_downloaded %}disabled{% endif %}>View File</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      document.getElementById('search-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+        const startDate = document.getElementById('start-date').value;
+        const endDate = document.getElementById('end-date').value;
+        const stockCodes = document.getElementById('stock-codes').value;
+        const loading = document.getElementById('loading');
+        const tableBody = document.querySelector('.table tbody');
+
+        loading.style.display = 'block';
+        tableBody.innerHTML = '';
+
+        fetch('/api/search', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            start_date: startDate,
+            end_date: endDate,
+            codes: stockCodes,
+          }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          loading.style.display = 'none';
+          if (data.status === 'success') {
+            data.announcements.forEach(ann => {
+              const fetchedAtDate = ann.fetched_at ? new Date(ann.fetched_at).toLocaleDateString() : '';
+              const row = `
+                <tr>
+                  <td>${ann.stock_code}</td>
+                  <td>${ann.company}</td>
+                  <td><a href="${ann.url}" target="_blank">${ann.title}</a></td>
+                  <td>${fetchedAtDate}</td>
+                  <td><a href="${ann.url}" target="_blank">Link</a></td>
+                  <td>${ann.grade}</td>
+                  <td>${ann.reason || ''}</td>
+                  <td>
+                    <button class="btn btn-sm btn-info" onclick="analyze('${ann.url}')">Analyze</button>
+                  </td>
+                </tr>
+              `;
+              tableBody.innerHTML += row;
+            });
+          } else {
+            alert('Search failed: ' + data.message);
+          }
+        })
+        .catch((error) => {
+          loading.style.display = 'none';
+          console.error('Error:', error);
+          alert('An error occurred during the search.');
+        });
+      });
+
+      document.getElementById('trigger-scrape').addEventListener('click', function() {
+        fetch('/api/trigger_scrape', { method: 'POST' })
+          .then(response => response.json())
+          .then(data => {
+            if (data.status === 'triggered') {
+              alert('Scraping job triggered successfully!');
+            } else {
+              alert('Failed to trigger scraping job.');
+            }
+          })
+          .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while triggering the scrape.');
+          });
+      });
+
+      document.addEventListener('DOMContentLoaded', _ => {
+        let now = new Date();
+        // 使用 'sv-SE' 格式为 YYYY-MM-DD，符合 input type=date 的要求
+        document.getElementById('start-date').value = now.toLocaleDateString('sv-SE');
+        document.getElementById('end-date').value = now.toLocaleDateString('sv-SE');
+      });
+
+      function analyze(url) {
+        // Placeholder for analyze functionality
+        alert('Analyze function called for URL: ' + url);
+        // You can implement a modal to show the analysis result
+      }
+
+      const stocksModal = document.getElementById('stocksModal');
+      stocksModal.addEventListener('show.bs.modal', function () {
+        loadStocks();
+      });
+
+      function loadStocks() {
+        const stockList = document.getElementById('stock-list');
+        stockList.innerHTML = '';
+        fetch('/api/stocks')
+          .then(response => response.json())
+          .then(codes => {
+            codes.forEach(code => {
+              const li = document.createElement('li');
+              li.className = 'list-group-item d-flex justify-content-between align-items-center';
+              li.innerHTML = `${code} <button class="btn btn-danger btn-sm" onclick="deleteStock('${code}')">Delete</button>`;
+              stockList.appendChild(li);
+            });
+          })
+          .catch(error => console.error('Error loading stocks:', error));
+      }
+
+      document.getElementById('add-stock-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+        const newStockCodes = document.getElementById('new-stock-codes').value;
+        fetch('/api/stocks', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ codes: newStockCodes.split(',').map(s => s.trim()) }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            document.getElementById('new-stock-codes').value = '';
+            loadStocks(); // Refresh the list
+          } else {
+            alert('Failed to add stocks.');
+          }
+        })
+        .catch(error => console.error('Error adding stocks:', error));
+      });
+
+      function deleteStock(code) {
+        if (confirm(`Are you sure you want to delete stock code ${code}?`)) {
+          fetch('/api/stocks', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ codes: [code] }),
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.status === 'success') {
+              loadStocks(); // Refresh the list
+            } else {
+              alert('Failed to delete stock.');
+            }
+          })
+          .catch(error => console.error('Error deleting stock:', error));
+        }
+      }
+
+      // Action functions for table rows
+      document.querySelector('.table tbody').addEventListener('click', function(event) {
+        const target = event.target;
+        if (target.classList.contains('download-btn')) {
+            const annId = target.dataset.annId;
+            const annUrl = target.dataset.annUrl;
+            const annStock = target.dataset.annStock;
+            const annTitle = target.dataset.annTitle;
+            downloadAnnouncement(annId, annUrl, annStock, annTitle, target);
+        } else if (target.classList.contains('analyze-btn')) {
+            const annId = target.dataset.annId;
+            const annUrl = target.dataset.annUrl;
+            const annLocalPath = target.dataset.annLocalPath;
+            const annStock = target.dataset.annStock;
+            const annTitle = target.dataset.annTitle;
+            analyzeAnnouncement(annId, annUrl, annLocalPath, annStock, annTitle, target);
+        } else if (target.classList.contains('view-file-btn')) {
+            const localPath = target.dataset.localPath;
+            viewFile(localPath);
+        }
+      });
+
+      function downloadAnnouncement(annId, url, stockCode, title, buttonElement) {
+        buttonElement.disabled = true; // Disable button during download
+        buttonElement.textContent = 'Downloading...';
+        fetch('/api/download', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url: url, stock_code: stockCode, title: title }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            alert('Download successful!');
+            const row = document.getElementById(`announcement-${annId}`);
+            row.dataset.isDownloaded = 'true';
+            row.dataset.localPath = data.text_path; // Update local_path
+            
+            // Enable View File button and update local_path
+            const viewFileBtn = row.querySelector('.view-file-btn');
+            if (viewFileBtn) {
+                viewFileBtn.disabled = false;
+                viewFileBtn.dataset.localPath = data.text_path;
+            }
+            buttonElement.textContent = 'Downloaded';
+            buttonElement.disabled = true;
+          } else {
+            alert('Download failed: ' + data.message);
+            buttonElement.disabled = false;
+            buttonElement.textContent = 'Download';
+          }
+        })
+        .catch(error => {
+          console.error('Error downloading:', error);
+          alert('An error occurred during download.');
+          buttonElement.disabled = false;
+          buttonElement.textContent = 'Download';
+        });
+      }
+
+      function analyzeAnnouncement(annId, url, localPath, stockCode, title, buttonElement) {
+        const analysisResultModal = new bootstrap.Modal(document.getElementById('analysisResultModal'));
+        const analysisText = document.getElementById('analysis-text');
+        
+        analysisText.textContent = 'Analyzing...';
+        analysisResultModal.show();
+        
+        fetch('/api/analyze', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url: url, text_path: localPath, stock_code: stockCode, title: title }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            analysisText.textContent = data.analysis || 'No analysis provided.';
+          } else {
+            analysisText.textContent = 'Analysis failed: ' + data.message;
+          }
+        })
+        .catch(error => {
+          console.error('Error analyzing:', error);
+          analysisText.textContent = 'An error occurred during analysis.';
+        });
+      }
+
+      function viewFile(localPath) {
+        if (localPath) {
+          window.open(`/api/get_file?file_path=${encodeURIComponent(localPath)}`, '_blank');
+        } else {
+          alert('File not available for viewing. Please download first.');
+        }
+      }
+
+      // Update search results generation to include buttons with data attributes
+      document.getElementById('search-form').addEventListener('submit', function(event) {
+        event.preventDefault();
+        const startDate = document.getElementById('start-date').value;
+        const endDate = document.getElementById('end-date').value;
+        const stockCodes = document.getElementById('stock-codes').value;
+        const loading = document.getElementById('loading');
+        const tableBody = document.querySelector('.table tbody');
+
+        loading.style.display = 'block';
+        tableBody.innerHTML = '';
+
+        fetch('/api/search', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            start_date: startDate,
+            end_date: endDate,
+            codes: stockCodes,
+          }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          loading.style.display = 'none';
+          if (data.status === 'success') {
+            data.announcements.forEach(ann => {
+              const fetchedAtDate = ann.fetched_at ? new Date(ann.fetched_at).toLocaleDateString() : '';
+              const isDownloaded = ann.is_downloaded ? 'true' : 'false';
+              const downloadBtnDisabled = ann.is_downloaded ? 'disabled' : '';
+              const viewFileBtnDisabled = ann.is_downloaded ? '' : 'disabled';
+              const localPath = ann.local_path || '';
+
+              const row = `
+                <tr id="announcement-${ann.id}" data-is-downloaded="${isDownloaded}" data-local-path="${localPath}">
+                  <td>${ann.stock_code}</td>
+                  <td>${ann.company}</td>
+                  <td><a href="${ann.url}" target="_blank">${ann.title}</a></td>
+                  <td>${fetchedAtDate}</td>
+                  <td><a href="${ann.url}" target="_blank">Link</a></td>
+                  <td>${ann.grade}</td>
+                  <td>${ann.reason || ''}</td>
+                  <td>
+                    <button class="btn btn-sm btn-primary download-btn" data-ann-id="${ann.id}" data-ann-url="${ann.url}" data-ann-stock="${ann.stock_code}" data-ann-title="${ann.title}" ${downloadBtnDisabled}>Download</button>
+                    <button class="btn btn-sm btn-info analyze-btn" data-ann-id="${ann.id}" data-ann-url="${ann.url}" data-ann-local-path="${localPath}" data-ann-stock="${ann.stock_code}" data-ann-title="${ann.title}">Analyze</button>
+                    <button class="btn btn-sm btn-secondary view-file-btn" data-local-path="${localPath}" ${viewFileBtnDisabled}>View File</button>
+                  </td>
+                </tr>
+              `;
+              tableBody.innerHTML += row;
+            });
+          } else {
+            alert('Search failed: ' + data.message);
+          }
+        })
+        .catch((error) => {
+          loading.style.display = 'none';
+          console.error('Error:', error);
+          alert('An error occurred during the search.');
+        });
+      });
+    </script>
+
+
+    <!-- Stocks Modal -->
+    <div class="modal fade" id="stocksModal" tabindex="-1" aria-labelledby="stocksModalLabel" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="stocksModalLabel">Manage Stock Codes</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <h6>Current Stocks</h6>
+            <ul id="stock-list" class="list-group mb-3">
+              <!-- Stocks will be loaded here -->
+            </ul>
+            <form id="add-stock-form">
+              <div class="mb-3">
+                <label for="new-stock-codes" class="form-label">Add New Codes (comma-separated)</label>
+                <input type="text" class="form-control" id="new-stock-codes" placeholder="e.g., 6502, 9985">
+              </div>
+              <button type="submit" class="btn btn-primary">Add Codes</button>
+            </form>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analysis Result Modal -->
+    <div class="modal fade" id="analysisResultModal" tabindex="-1" aria-labelledby="analysisResultModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="analysisResultModalLabel">Analysis Result</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <pre id="analysis-text"></pre>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
