@@ -31,6 +31,7 @@ class Announcement(db.Model):
     analysis_status = db.Column(db.String(20), default='pending') # pending, success, failed
     analysis_time = db.Column(db.DateTime)
     error_message = db.Column(db.String(500))
+    reason = db.Column(db.String(500)) # Reason for the grade
 
     def to_dict(self):
         return {
@@ -47,6 +48,8 @@ class Announcement(db.Model):
             'original_text': self.extracted_text,
             'status': self.analysis_status,
             'analysis_time': self.analysis_time.strftime("%Y-%m-%d %H:%M:%S") if self.analysis_time else None,
+            'fetched_at': self.fetched_at.strftime("%Y-%m-%d %H:%M:%S") if self.fetched_at else None,
             'grade': self.grade,
-            'score': self.score
+            'score': self.score,
+            'reason': self.reason
         }

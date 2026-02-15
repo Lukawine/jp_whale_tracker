@@ -44,6 +44,9 @@ with app.app_context():
                 logger.info("Migrating database: Adding grade and score columns...")
                 conn.execute(text("ALTER TABLE announcement ADD COLUMN grade VARCHAR(5)"))
                 conn.execute(text("ALTER TABLE announcement ADD COLUMN score INTEGER"))
+            if 'reason' not in existing_columns:
+                logger.info("Migrating database: Adding reason column...")
+                conn.execute(text("ALTER TABLE announcement ADD COLUMN reason VARCHAR(500)"))
             conn.commit()
 
 # --- Scheduled Task ---
@@ -86,7 +89,8 @@ def scheduled_scraping_job():
                     title=ann_data['title'],
                     doc_type=ann_data['type'],
                     grade=grading_result['grade'],
-                    score=grading_result['score']
+                    score=grading_result['score'],
+                    reason=grading_result['reason']
                 )
                 db.session.add(new_ann)
                 db.session.commit()
@@ -209,6 +213,7 @@ def search_announcements():
         html_content = fetch_tdnet_page(current_date)
         if html_content:
             anns = parse_announcements(html_content, target_codes, Config.ANNOUNCEMENT_KEYWORDS, current_date)
+            print("anns:", anns);
             for ann_data in anns:
                 existing = Announcement.query.filter_by(url=ann_data['url']).first()
                 if not existing:
