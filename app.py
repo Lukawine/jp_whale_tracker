@@ -338,4 +338,6 @@ def index():
 
 if __name__ == '__main__':
     if threading.current_thread() is threading.main_thread():
+        # 移除这行
+        # app.run(debug=True, port=5000)
         app.run(debug=True, port=5000)
