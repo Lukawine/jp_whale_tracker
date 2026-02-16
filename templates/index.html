@@ -119,14 +119,13 @@
               const downloadBtnDisabled = ann.is_downloaded ? 'disabled' : '';
               const viewFileBtnDisabled = ann.is_downloaded ? '' : 'disabled';
               const localPath = ann.local_path || '';
-
               const row = `
                 <tr id="announcement-${ann.id}" data-is-downloaded="${isDownloaded}" data-local-path="${localPath}">
                   <td>${ann.grade}</td>
                   <td>${ann.stock_code}</td>
                   <td>${ann.company}</td>
                   <td><a href="${ann.url}" target="_blank">${ann.title}</a></td>
-                  <td>${fetchedAtDate}</td>
+                  <td>${ann.fetched_at}</td>
                   <td><a href="${ann.url}" target="_blank">Link</a></td>
                   <td>${ann.reason || ''}</td>
                   <td>
