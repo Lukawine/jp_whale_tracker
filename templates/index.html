@@ -113,62 +113,6 @@
         .then(data => {
           loading.style.display = 'none';
           if (data.status === 'success') {
-            
-            data.announcements.forEach(ann => {
-              const fetchedAtDate = ann.time ? new Date(ann.time).toLocaleDateString() : '';
-              const row = `
-                <tr>
-                  <td>${ann.stock_code}</td>
-                  <td>${ann.company}</td>
-                  <td><a href="${ann.url}" target="_blank">${ann.title}</a></td>
-                  <td>${ann.time}</td>
-                  <td><a href="${ann.url}" target="_blank">Link</a></td>
-                  <td>${ann.grade}</td>
-                  <td>${ann.reason || ''}</td>
-                  <td>
-                    <button class="btn btn-sm btn-info" onclick="analyze('${ann.url}')">Analyze</button>
-                  </td>
-                </tr>
-              `;
-              tableBody.innerHTML += row;
-            });
-          } else {
-            alert('Search failed: ' + data.message);
-          }
-        })
-        .catch((error) => {
-          loading.style.display = 'none';
-          console.error('Error:', error);
-          alert('An error occurred during the search.');
-        });
-      });
-
-      document.getElementById('search-form').addEventListener('submit', function(event) {
-        event.preventDefault();
-        const startDate = document.getElementById('start-date').value;
-        const endDate = document.getElementById('end-date').value;
-        const stockCodes = document.getElementById('stock-codes').value;
-        const loading = document.getElementById('loading');
-        const tableBody = document.querySelector('.table tbody');
-
-        loading.style.display = 'block';
-        tableBody.innerHTML = '';
-
-        fetch('/api/search', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            start_date: startDate,
-            end_date: endDate,
-            codes: stockCodes,
-          }),
-        })
-        .then(response => response.json())
-        .then(data => {
-          loading.style.display = 'none';
-          if (data.status === 'success') {
             data.announcements.forEach(ann => {
               const fetchedAtDate = ann.fetched_at ? new Date(ann.fetched_at).toLocaleDateString() : '';
               const isDownloaded = ann.is_downloaded ? 'true' : 'false';
@@ -187,6 +131,7 @@
                   <td>${ann.reason || ''}</td>
                   <td>
                     <button class="btn btn-sm btn-primary download-btn" data-ann-id="${ann.id}" data-ann-url="${ann.url}" data-ann-stock="${ann.stock_code}" data-ann-title="${ann.title}" ${downloadBtnDisabled}>Download</button>
+
                     <button class="btn btn-sm btn-info analyze-btn" data-ann-id="${ann.id}" data-ann-url="${ann.url}" data-ann-local-path="${localPath}" data-ann-stock="${ann.stock_code}" data-ann-title="${ann.title}">Analyze</button>
                     <button class="btn btn-sm btn-secondary view-file-btn" data-local-path="${localPath}" ${viewFileBtnDisabled}>View File</button>
                   </td>
@@ -204,7 +149,7 @@
           alert('An error occurred during the search.');
         });
       });
-      
+
 
       document.getElementById('trigger-scrape').addEventListener('click', function() {
         fetch('/api/trigger_scrape', { method: 'POST' })
@@ -304,7 +249,6 @@
         }
       }
 
-       // Action functions for table rows
       if(document.querySelector('.table tbody')){
       document.querySelector('.table tbody').addEventListener('click', function(event) {
         const target = event.target;
