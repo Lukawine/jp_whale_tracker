@@ -258,6 +258,7 @@ def analyze_saved_text(text_path, stock_code, title):
     try:
         with open(text_path, 'r', encoding='utf-8') as f:
             text_content = f.read()
+            
         
         # Check for empty or very short text (parsing failure)
         if len(text_content.strip()) < 50:
@@ -266,7 +267,8 @@ def analyze_saved_text(text_path, stock_code, title):
         # Check for garbled text (heuristic: high percentage of replacement characters)
         if text_content.count('\ufffd') > len(text_content) * 0.05:
             return {'status': 'failed', 'reason': 'Parsed text appears garbled. Please view original file.'}
-            
+        
+        print("====text_content:",text_content);
         analysis_result = analyze_with_ai(text_content, stock_code, title)
         # analyze_with_ai returns a string directly, so wrap it in success status
         if isinstance(analysis_result, str) and not analysis_result.startswith("Error"):

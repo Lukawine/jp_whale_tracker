@@ -167,8 +167,6 @@
       });
 
       document.addEventListener('DOMContentLoaded', function() {
-        
-
         let now = new Date();
         // 使用 'sv-SE' 格式为 YYYY-MM-DD，符合 input type=date 的要求
         document.getElementById('start-date').value = now.toLocaleDateString('sv-SE');
@@ -251,7 +249,6 @@
       if(document.querySelector('.table tbody')){
       document.querySelector('.table tbody').addEventListener('click', function(event) {
         const target = event.target;
-        console.log(target);
         if (target.classList.contains('download-btn')) {
             const annId = target.dataset.annId;
             const annUrl = target.dataset.annUrl;
@@ -261,14 +258,12 @@
         } else if (target.classList.contains('analyze-btn')) {
             const annId = target.dataset.annId;
             const annUrl = target.dataset.annUrl;
-            const annLocalPath = target.dataset.annLocalPath;
+            const localPath = target.dataset.annLocalPath;
             const annStock = target.dataset.annStock;
             const annTitle = target.dataset.annTitle;
-            console.log(annLocalPath);
-            analyzeAnnouncement(annId, annUrl, annLocalPath, annStock, annTitle, target);
+            analyzeAnnouncement(annId, annUrl, localPath, annStock, annTitle, target);
         } else if (target.classList.contains('view-file-btn')) {
             const localPath = target.dataset.localPath;
-            console.log(localPath);
             viewFile(localPath);
         }
       });}
@@ -286,19 +281,28 @@
         .then(response => response.json())
         .then(data => {
           if (data.status === 'success') {
-            alert('Download successful!');
             const row = document.getElementById(`announcement-${annId}`);
             row.dataset.isDownloaded = 'true';
             row.dataset.localPath = data.text_path; // Update local_path
-
             // Enable View File button and update local_path
             const viewFileBtn = row.querySelector('.view-file-btn');
             if (viewFileBtn) {
                 viewFileBtn.disabled = false;
                 viewFileBtn.dataset.localPath = data.text_path;
             }
+
+            const analyzBtn = row.querySelector('.analyze-btn');
+            if (analyzBtn) {
+              analyzBtn.disabled = false;
+              analyzBtn.dataset.annLocalPath = data.text_path;
+            }
             buttonElement.textContent = 'Downloaded';
             buttonElement.disabled = true;
+
+
+            // annlyze
+            // analyzeAnnouncement(annId, data.data.text_path, stockCode, data.annTitle, true);
+
           } else {
             alert('Download failed: ' + data.message);
             buttonElement.disabled = false;
@@ -318,7 +322,7 @@
         const analysisText = document.getElementById('analysis-text');
         analysisText.textContent = 'Analyzing...';
         analysisResultModal.show();
-        
+
         fetch('/api/analyze', {
           method: 'POST',
           headers: {

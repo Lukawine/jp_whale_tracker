@@ -7,7 +7,7 @@ class Config:
     TARGET_STOCK_CODES = ['7203', '9984'] # Example stock codes (Toyota, Softbank Group)
     # Keywords to filter announcements (Using actual Japanese terms found in TDnet titles)
     # 業績予想 (Earnings Forecast/Revision), 自己株式 (Treasury Stock/Buyback), 売出 (Offering/Sale)
-    ANNOUNCEMENT_KEYWORDS = ["業績予想", "自己株式", "売出"]
+    ANNOUNCEMENT_KEYWORDS = []
     DOWNLOAD_DIR = "./data/downloads"
     ANALYSIS_DIR = "./data/analysis"
     # Database Config

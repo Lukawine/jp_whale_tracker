@@ -8,10 +8,10 @@ import logging
 from flask_apscheduler import APScheduler
 from sqlalchemy import text, inspect
 
-from config import Config
+from config import Config # fixed
 from models import db, Announcement, StockCode
 from tdnet_scraper import fetch_tdnet_page, parse_announcements
-import announcement_processor
+import announcement_processor # fixed
 from grading_system import grader # Import the new module
 
 load_dotenv()
@@ -65,7 +65,10 @@ def scheduled_scraping_job():
         
         # 2. Scrape (Today)
         current_date = datetime.now()
+        # html_content = fetch_all_tdnet_pages(current_date)
         html_content = fetch_tdnet_page(current_date)
+        
+        # html_content = tdnet_scraper.fetch_all_tdnet_pages(current_date)
         if not html_content:
             return
             
@@ -154,7 +157,7 @@ def process_announcement(ann_id):
 @app.route('/api/announcements', methods=['GET'])
 def get_announcements():
     # Simple fetch all for now, can add pagination/filtering
-    anns = Announcement.query.order_by(Announcement.fetched_at.desc()).all()
+    anns = Announcement.query.order_by(Announcement.time.desc()).all()
     return jsonify({'status': 'success', 'announcements': [a.to_dict() for a in anns]})
 
 # 2. Stock Management Endpoints
@@ -210,10 +213,11 @@ def search_announcements():
     found_announcements = []
     current_date = start_date
     while current_date <= end_date:
+        # html_content = fetch_all_tdnet_pages(current_date)
         html_content = fetch_tdnet_page(current_date)
         if html_content:
             anns = parse_announcements(html_content, target_codes, Config.ANNOUNCEMENT_KEYWORDS, current_date)
-            print("anns:", anns);
+            anns.pop(0);
             for ann_data in anns:
                 existing = Announcement.query.filter_by(url=ann_data['url']).first()
                 if not existing:
@@ -223,7 +227,7 @@ def search_announcements():
                     new_ann = Announcement(
                         url=ann_data['url'],
                         time=ann_data['time'],
-                        stock_code=ann_data['stock_code'],
+                        stock_code = ann_data['stock_code'],
                         company_name=ann_data['company'],
                         title=ann_data['title'],
                         doc_type=ann_data['type'],
@@ -231,12 +235,12 @@ def search_announcements():
                         score=grading_result['score']
                     )
                     db.session.add(new_ann)
-                    db.session.commit()
+                    db.session.flush()
                     found_announcements.append(new_ann.to_dict())
                 else:
-                    found_announcements.append(existing.to_dict())
+                    found_announcements.append(existing.to_dict())    
         current_date += timedelta(days=1)
-        
+
     return jsonify({'status': 'success', 'announcements': found_announcements})
 
 # 5. Download Endpoint
@@ -249,7 +253,6 @@ def download_endpoint():
         if ann:
             ann.is_downloaded = True
             ann.local_path = result['text_path'] # Renamed from text_path to generic file_path
-            
             # Read Markdown content for DB storage
             if ann.local_path.lower().endswith('.md'): # Expecting a .md file now
                 try:
@@ -276,7 +279,6 @@ def analyze_endpoint():
     url = data.get('url')
     force_refresh = data.get('force', False)
     provider = data.get('provider', 'gemini') # Default to gemini if not provided
-    
     # Check DB for existing analysis. If no force_refresh, use cached result.
     ann = Announcement.query.filter_by(url=url).first()
     
@@ -333,7 +335,7 @@ def get_file_endpoint():
 
 @app.route('/')
 def index():
-    anns = Announcement.query.order_by(Announcement.fetched_at.desc()).all()
+    anns = Announcement.query.order_by(Announcement.time.desc()).all()
     return render_template('index.html', announcements=[a.to_dict() for a in anns])
 
 if __name__ == '__main__':
