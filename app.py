@@ -201,7 +201,6 @@ def search_announcements():
     start_date_str = data.get('start_date')
     end_date_str = data.get('end_date')
     codes_str = data.get('codes', '')
-    
     target_codes = [c.strip() for c in codes_str.split(',') if c.strip()]
     
     try:
@@ -217,7 +216,10 @@ def search_announcements():
         html_content = fetch_tdnet_page(current_date)
         if html_content:
             anns = parse_announcements(html_content, target_codes, Config.ANNOUNCEMENT_KEYWORDS, current_date)
-            anns.pop(0);
+            # 如果没有按照code搜索，去掉第一行
+            if len(target_codes) <= 0:
+                anns.pop(0);
+                
             for ann_data in anns:
                 existing = Announcement.query.filter_by(url=ann_data['url']).first()
                 if not existing:

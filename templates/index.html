@@ -16,11 +16,11 @@
           <div class="row g-3 align-items-end">
             <div class="col-md">
               <label for="start-date" class="form-label">Start Date</label>
-              <input type="date" class="form-control" id="start-date">
+              <input type="date" class="form-control" id="start-date" autocomplete="off">
             </div>
             <div class="col-md">
               <label for="end-date" class="form-label">End Date</label>
-              <input type="date" class="form-control" id="end-date">
+              <input type="date" class="form-control" id="end-date" autocomplete="off">
             </div>
             <div class="col-md">
               <label for="stock-codes" class="form-label">Stock Codes (comma-separated)</label>
@@ -125,7 +125,7 @@
                   <td>${ann.stock_code}</td>
                   <td>${ann.company}</td>
                   <td><a href="${ann.url}" target="_blank">${ann.title}</a></td>
-                  <td>${ann.fetched_at}</td>
+                  <td>${ann.time}</td>
                   <td><a href="${ann.url}" target="_blank">Link</a></td>
                   <td>${ann.reason || ''}</td>
                   <td>
@@ -167,10 +167,14 @@
       });
 
       document.addEventListener('DOMContentLoaded', function() {
-        let now = new Date();
-        // 使用 'sv-SE' 格式为 YYYY-MM-DD，符合 input type=date 的要求
-        document.getElementById('start-date').value = now.toLocaleDateString('sv-SE');
-        document.getElementById('end-date').value = now.toLocaleDateString('sv-SE');
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const todayStr = `${year}-${month}-${day}`;
+        
+        document.getElementById('start-date').value = todayStr;
+        document.getElementById('end-date').value = todayStr;
       });
 
       function analyze(url) {
@@ -354,7 +358,7 @@
     </script>
 
 
-    <!-- Stocks Modal -->
+    <!-- Stocks Modal mananger-->
     <div class="modal fade" id="stocksModal" tabindex="-1" aria-labelledby="stocksModalLabel" aria-hidden="true">
       <div class="modal-dialog">
         <div class="modal-content">
