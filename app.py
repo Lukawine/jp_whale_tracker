@@ -10,7 +10,7 @@ from sqlalchemy import text, inspect
 
 from config import Config # fixed
 from models import db, Announcement, StockCode
-from tdnet_scraper import fetch_tdnet_page, parse_announcements
+from tdnet_scraper import fetch_tdnet_page, parse_announcements,fetch_all_daily_tdnet_pages
 import announcement_processor # fixed
 from grading_system import grader # Import the new module
 
@@ -67,6 +67,7 @@ def scheduled_scraping_job():
         current_date = datetime.now()
         # html_content = fetch_all_tdnet_pages(current_date)
         html_content = fetch_tdnet_page(current_date)
+        
         
         # html_content = tdnet_scraper.fetch_all_tdnet_pages(current_date)
         if not html_content:
@@ -213,7 +214,8 @@ def search_announcements():
     current_date = start_date
     while current_date <= end_date:
         # html_content = fetch_all_tdnet_pages(current_date)
-        html_content = fetch_tdnet_page(current_date)
+        # html_content = fetch_tdnet_page(current_date)
+        html_content = fetch_all_daily_tdnet_pages(current_date)
         if html_content:
             anns = parse_announcements(html_content, target_codes, Config.ANNOUNCEMENT_KEYWORDS, current_date)
             # 如果没有按照code搜索，去掉第一行
